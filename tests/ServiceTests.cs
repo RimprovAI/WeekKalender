@@ -267,37 +267,89 @@ namespace WeekKalender.Tests
     {
         const string TestRoot = @"Software\WeekKalenderTests";
 
-        public static void AanUitEnTaakbeheer()
+        static readonly byte[] DisabledFlag = { 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+        static Autostart Make(string exe, string folder)
         {
-            string exe = @"C:\Programma's\WeekKalender\WeekKalender.exe";
-            var autostart = new Autostart(exe, "WeekKalender", TestRoot + @"\Run", TestRoot + @"\Approved");
+            return new Autostart(exe, "WeekKalender", folder, TestRoot + @"\Run", TestRoot + @"\ApprovedRun", TestRoot + @"\ApprovedFolder");
+        }
+
+        static string RunValue()
+        {
+            using (var run = Registry.CurrentUser.OpenSubKey(TestRoot + @"\Run"))
+                return run == null ? null : run.GetValue("WeekKalender") as string;
+        }
+
+        static void WithSandbox(Action<string, string> test)
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "WeekKalenderOpstarten");
+            if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            // Een bestaand bestand als 'programma', zodat de snelkoppeling een echt doel heeft.
+            string exe = typeof(AutostartTests).Assembly.Location;
             try
             {
-                Assert.False(autostart.IsEnabled(), "begint uit");
-                autostart.Enable();
-                Assert.True(autostart.IsEnabled(), "aan");
-                using (var run = Registry.CurrentUser.OpenSubKey(TestRoot + @"\Run"))
-                    Assert.Equal("\"" + exe + "\"", run.GetValue("WeekKalender") as string, "opdracht met aanhalingstekens");
-
-                // Uitgezet via Taakbeheer.
-                using (var approved = Registry.CurrentUser.CreateSubKey(TestRoot + @"\Approved"))
-                    approved.SetValue("WeekKalender", new byte[] { 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, RegistryValueKind.Binary);
-                Assert.False(autostart.IsEnabled(), "uitgeschakeld in Taakbeheer");
-                autostart.Enable();
-                Assert.True(autostart.IsEnabled(), "weer aan via het menu");
-
-                var moved = new Autostart(@"D:\Elders\WeekKalender.exe", "WeekKalender", TestRoot + @"\Run", TestRoot + @"\Approved");
-                Assert.False(moved.IsEnabled(), "verplaatst programma telt niet als aan");
-
-                autostart.Disable();
-                Assert.False(autostart.IsEnabled(), "uit");
-                using (var run = Registry.CurrentUser.OpenSubKey(TestRoot + @"\Run"))
-                    Assert.Equal(null, run.GetValue("WeekKalender"), "waarde verwijderd");
+                test(exe, folder);
             }
             finally
             {
                 Registry.CurrentUser.DeleteSubKeyTree(TestRoot, false);
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
             }
+        }
+
+        public static void AanUitEnTaakbeheer()
+        {
+            WithSandbox((exe, folder) =>
+            {
+                var autostart = Make(exe, folder);
+                Assert.False(autostart.IsEnabled(), "begint uit");
+                autostart.Enable();
+                Assert.True(File.Exists(Path.Combine(folder, "WeekKalender.lnk")), "snelkoppeling in map Opstarten");
+                Assert.True(autostart.IsEnabled(), "aan");
+
+                // Uitgezet via Taakbeheer.
+                using (var approved = Registry.CurrentUser.CreateSubKey(TestRoot + @"\ApprovedFolder"))
+                    approved.SetValue("WeekKalender.lnk", DisabledFlag, RegistryValueKind.Binary);
+                Assert.False(autostart.IsEnabled(), "uitgeschakeld in Taakbeheer");
+                autostart.Enable();
+                Assert.True(autostart.IsEnabled(), "weer aan via het menu");
+
+                var moved = Make(Path.Combine(Environment.SystemDirectory, "notepad.exe"), folder);
+                Assert.False(moved.IsEnabled(), "snelkoppeling naar ander programma telt niet als aan");
+
+                autostart.Disable();
+                Assert.False(autostart.IsEnabled(), "uit");
+                Assert.False(File.Exists(Path.Combine(folder, "WeekKalender.lnk")), "snelkoppeling verwijderd");
+            });
+        }
+
+        public static void OudeRunWaardeWordtOmgezet()
+        {
+            WithSandbox((exe, folder) =>
+            {
+                using (var run = Registry.CurrentUser.CreateSubKey(TestRoot + @"\Run"))
+                    run.SetValue("WeekKalender", "\"" + exe + "\"");
+                var autostart = Make(exe, folder);
+                Assert.True(autostart.MigrateFromRunKey(), "omgezet");
+                Assert.True(autostart.IsEnabled(), "nu aan via map Opstarten");
+                Assert.Equal(null, RunValue(), "Run-waarde opgeruimd");
+                Assert.False(autostart.MigrateFromRunKey(), "tweede keer niets te doen");
+            });
+        }
+
+        public static void UitgeschakeldeRunWaardeBlijftUit()
+        {
+            WithSandbox((exe, folder) =>
+            {
+                using (var run = Registry.CurrentUser.CreateSubKey(TestRoot + @"\Run"))
+                    run.SetValue("WeekKalender", "\"" + exe + "\"");
+                using (var approved = Registry.CurrentUser.CreateSubKey(TestRoot + @"\ApprovedRun"))
+                    approved.SetValue("WeekKalender", DisabledFlag, RegistryValueKind.Binary);
+                var autostart = Make(exe, folder);
+                Assert.True(autostart.MigrateFromRunKey(), "opgeruimd");
+                Assert.False(autostart.IsEnabled(), "niet stiekem aangezet");
+                Assert.Equal(null, RunValue(), "Run-waarde opgeruimd");
+            });
         }
     }
 

@@ -63,7 +63,7 @@ Alles staat in je eigen gebruikersmap, `%APPDATA%\WeekKalender\`:
   - `CacheMinuten=5`
 - `log.txt`: korte technische meldingen, zonder inhoud van afspraken.
 
-Autostart zet één waarde in `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` (geen adminrechten nodig). Heb je WeekKalender in Taakbeheer bij *Opstarten* uitgeschakeld, dan staat het vinkje uit en zet het menu het weer aan. Verplaats je de exe, zet autostart dan opnieuw aan.
+Autostart zet een snelkoppeling `WeekKalender.lnk` in je map Opstarten (`shell:startup`, geen adminrechten nodig). De eerste versie gebruikte de Run-sleutel in het register, maar op deze werkplek sloeg Windows die bij het aanmelden zonder melding over. Een oude Run-waarde zet het programma bij de volgende start automatisch om. Heb je WeekKalender in Taakbeheer bij *Opstarten* uitgeschakeld, dan staat het vinkje uit en zet het menu het weer aan. Verplaats je de exe, zet autostart dan opnieuw aan.
 
 Er draait altijd maar één WeekKalender. Start je hem nog een keer, dan opent de agenda van het programma dat al draait. Geen telemetrie, geen updates van internet.
 

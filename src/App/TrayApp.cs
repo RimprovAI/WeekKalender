@@ -41,6 +41,14 @@ namespace WeekKalender.App
         {
             _settings = settings;
             _autostart = new Autostart(Assembly.GetEntryAssembly().Location);
+            try
+            {
+                if (_autostart.MigrateFromRunKey()) Log.Info("Autostart omgezet van Run-sleutel naar map Opstarten");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Autostart omzetten: " + ex.Message);
+            }
             _theme = ThemeInfo.Read();
 
             // Verborgen venster (geen message-only venster: die krijgen geen broadcasts als TaskbarCreated en WM_SETTINGCHANGE).

@@ -138,11 +138,11 @@ namespace WeekKalender.App
         };
         public readonly Ellipse Dot = new Ellipse
         {
-            Width = 4,
-            Height = 4,
+            Width = 5,
+            Height = 5,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 7),
+            Margin = new Thickness(0, 0, 0, 6),
         };
 
         public DayCell()

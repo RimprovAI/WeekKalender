@@ -17,8 +17,9 @@ namespace WeekKalender.Core
     /// </summary>
     public static class WeekInput
     {
-        const int MinYear = 1900;
-        const int MaxYear = 2200;
+        /// <summary>Bereik van de agenda: ook bladeren en dagen selecteren houden zich hieraan.</summary>
+        public const int MinYear = 1900;
+        public const int MaxYear = 2200;
 
         static readonly Regex WeekFirst = new Regex(@"^(?:(?:week|wk|w)\s*)?(\d{1,3})(?:\s*[-/,. ]\s*(\d{4}))?$", RegexOptions.CultureInvariant);
         static readonly Regex YearFirst = new Regex(@"^(\d{4})\s*[-/ ]?\s*(?:week|wk|w)?\s*(\d{1,3})$", RegexOptions.CultureInvariant);

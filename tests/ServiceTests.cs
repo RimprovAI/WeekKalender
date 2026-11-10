@@ -139,6 +139,28 @@ namespace WeekKalender.Tests
             }
         }
 
+        public static void MislukteVerversingBewaartEerdereAfspraken()
+        {
+            DateTime now = new DateTime(2026, 10, 21, 9, 0, 0);
+            bool fail = false;
+            var provider = new FakeProvider { OnFetch = (s, e) => fail ? ProviderResult.NotAvailable("Outlook is bezig") : Ok("Eerder opgehaald") };
+            using (var service = Service(provider, now: () => now))
+            {
+                Assert.True(service.GetAsync(Start, End).Result.IsOk, "eerste keer gelukt");
+                now = now.AddMinutes(6);
+                fail = true;
+                ProviderResult refresh = service.GetAsync(Start, End).Result;
+                Assert.Equal(ProviderStatus.NotAvailable, refresh.Status, "de aanroeper hoort dat verversen mislukte");
+
+                ProviderResult cached;
+                bool fresh;
+                Assert.True(service.TryGetCached(Start, out cached, out fresh), "maand staat nog in de cache");
+                Assert.True(cached.IsOk, "de eerder opgehaalde afspraken zijn niet overschreven door de fout");
+                Assert.Equal("Eerder opgehaald", cached.Items[0].Subject, "zelfde afspraken");
+                Assert.False(fresh, "wel als verouderd gemarkeerd, zodat er opnieuw wordt geprobeerd");
+            }
+        }
+
         public static void FoutenKortGecachet()
         {
             DateTime now = new DateTime(2026, 10, 21, 9, 0, 0);
@@ -243,18 +265,30 @@ namespace WeekKalender.Tests
                 Assert.Equal("auto", defaults.Source, "bron");
                 Assert.True(defaults.StartOutlook, "Outlook starten");
                 Assert.Equal(5, defaults.CacheMinutes, "cache");
+                Assert.Equal("auto", defaults.Theme, "thema");
 
-                File.WriteAllText(file, "; test\r\nBron=ics\r\nIcsBron=\"C:\\agenda.ics\"\r\nOutlookStarten=nee\r\nCacheMinuten=999\r\n");
+                File.WriteAllText(file, "; test\r\nBron=ics\r\nIcsBron=\"C:\\agenda.ics\"\r\nOutlookStarten=nee\r\nCacheMinuten=999\r\nThema=Licht\r\n");
                 File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddSeconds(5));
                 Assert.True(defaults.ReloadIfChanged(), "wijziging gezien");
                 Assert.Equal("ics", defaults.Source, "bron");
                 Assert.Equal(@"C:\agenda.ics", defaults.IcsSource, "pad zonder aanhalingstekens");
                 Assert.False(defaults.StartOutlook, "Outlook niet starten");
                 Assert.Equal(120, defaults.CacheMinutes, "begrensd");
+                Assert.Equal("licht", defaults.Theme, "thema uit bestand, hoofdletters maken niet uit");
                 Assert.False(defaults.ReloadIfChanged(), "geen nieuwe wijziging");
 
-                File.WriteAllText(file, "Bron=onzin\r\n");
-                Assert.Equal("auto", AppSettings.Load(file).Source, "onbekende bron wordt auto");
+                // Bestand van een oudere versie (zonder Thema): waarden blijven staan, de nieuwe regel komt er één keer bij.
+                File.WriteAllText(file, "Bron=onzin\r\nCacheMinuten=7\r\n");
+                AppSettings old = AppSettings.Load(file);
+                Assert.Equal("auto", old.Source, "onbekende bron wordt auto");
+                Assert.Equal("auto", old.Theme, "ontbrekend thema wordt auto");
+                AppSettings again = AppSettings.Load(file);
+                Assert.Equal(7, again.CacheMinutes, "bestaande waarde behouden");
+                string text = File.ReadAllText(file);
+                Assert.Equal(1, System.Text.RegularExpressions.Regex.Matches(text, "(?m)^Thema=auto").Count, "Thema-regel precies één keer aangevuld");
+
+                File.WriteAllText(file, "Thema=paars\r\n");
+                Assert.Equal("auto", AppSettings.Load(file).Theme, "onbekend thema wordt auto");
             }
             finally
             {

@@ -39,7 +39,7 @@ namespace WeekKalender.Providers
         {
             ProviderSetup setup = ProviderSetup.Create(settings);
             return new AppointmentService(setup.Primary, setup.Fallback, setup.Message, TimeSpan.FromSeconds(60),
-                                          TimeSpan.FromMinutes(settings.CacheMinutes), () => DateTime.Now);
+                                          TimeSpan.FromMinutes(settings.CacheMinutes), () => DateTime.UtcNow);
         }
 
         public void Reconfigure(AppSettings settings)

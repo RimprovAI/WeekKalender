@@ -39,6 +39,9 @@ namespace WeekKalender.Core
             if (result == null) return;
             lock (_lock)
             {
+                // Een mislukte verversing gooit eerder opgehaalde afspraken niet weg: liever iets ouds tonen dan niets.
+                Entry existing;
+                if (!result.IsOk && _entries.TryGetValue(key.Date, out existing) && existing.Result.IsOk) return;
                 _entries[key.Date] = new Entry { Result = result, StoredAt = _now() };
                 if (_entries.Count > _maxEntries)
                 {

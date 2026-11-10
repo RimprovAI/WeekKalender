@@ -31,10 +31,11 @@ function New-IconPng([int]$size) {
     $sheet = New-RoundedPath $m $m $w $w $r
     $g.FillPath([System.Drawing.Brushes]::White, $sheet)
 
-    $blue = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 0, 103, 192))
+    # Bovenrand in het merkrood (#E62249), net als de titelbalk van de agenda.
+    $red = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 230, 34, 73))
     $headerHeight = [single]($w * 0.30)
     $g.SetClip($sheet)
-    $g.FillRectangle($blue, $m, $m, $w, $headerHeight)
+    $g.FillRectangle($red, $m, $m, $w, $headerHeight)
     $g.ResetClip()
 
     $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, 0, 0, 0)), ([single]([Math]::Max(1, $size / 32)))

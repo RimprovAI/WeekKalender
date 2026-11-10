@@ -16,7 +16,12 @@ namespace WeekKalender.Core
         public const string SourceIcs = "ics";
         public const string SourceNone = "geen";
 
+        public const string ThemeAuto = "auto";
+        public const string ThemeLight = "licht";
+        public const string ThemeDark = "donker";
+
         DateTime _stamp;
+        bool _sawTheme;
 
         public AppSettings()
         {
@@ -24,6 +29,7 @@ namespace WeekKalender.Core
             IcsSource = "";
             StartOutlook = true;
             CacheMinutes = 5;
+            Theme = ThemeAuto;
         }
 
         /// <summary>auto, outlook, ics of geen.</summary>
@@ -36,6 +42,9 @@ namespace WeekKalender.Core
         public bool StartOutlook { get; set; }
 
         public int CacheMinutes { get; set; }
+
+        /// <summary>auto (volgt Windows), licht of donker.</summary>
+        public string Theme { get; set; }
 
         public string FilePath { get; private set; }
 
@@ -56,6 +65,8 @@ namespace WeekKalender.Core
                 else
                 {
                     settings.Read(File.ReadAllLines(path, Encoding.UTF8));
+                    // Bestand van een oudere versie: de nieuwe instelling met uitleg erbij zetten.
+                    if (!settings._sawTheme) File.AppendAllText(path, Environment.NewLine + ThemeBlock(settings.Theme), new UTF8Encoding(false));
                 }
                 settings._stamp = File.GetLastWriteTimeUtc(path);
             }
@@ -80,6 +91,7 @@ namespace WeekKalender.Core
                 IcsSource = fresh.IcsSource;
                 StartOutlook = fresh.StartOutlook;
                 CacheMinutes = fresh.CacheMinutes;
+                Theme = fresh.Theme;
                 _stamp = stamp;
                 return true;
             }
@@ -103,7 +115,7 @@ namespace WeekKalender.Core
                 switch (key)
                 {
                     case "bron":
-                        Source = NormalizeSource(value);
+                        Source = Normalize(value, "Bron", SourceAuto, SourceOutlook, SourceIcs, SourceNone);
                         break;
                     case "icsbron":
                         IcsSource = value.Trim('"');
@@ -117,16 +129,21 @@ namespace WeekKalender.Core
                         if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out minutes))
                             CacheMinutes = Math.Max(1, Math.Min(120, minutes));
                         break;
+                    case "thema":
+                        Theme = Normalize(value, "Thema", ThemeAuto, ThemeLight, ThemeDark);
+                        _sawTheme = true;
+                        break;
                 }
             }
         }
 
-        static string NormalizeSource(string value)
+        /// <summary>Geeft de waarde in kleine letters terug als hij is toegestaan, anders de eerste (standaard)waarde.</summary>
+        static string Normalize(string value, string name, params string[] allowed)
         {
             string v = value.Trim().ToLowerInvariant();
-            if (v == SourceAuto || v == SourceOutlook || v == SourceIcs || v == SourceNone) return v;
-            Log.Warn("Onbekende waarde voor Bron: '" + value + "', 'auto' wordt gebruikt.");
-            return SourceAuto;
+            if (Array.IndexOf(allowed, v) >= 0) return v;
+            Log.Warn("Onbekende waarde voor " + name + ": '" + value + "', '" + allowed[0] + "' wordt gebruikt.");
+            return allowed[0];
         }
 
         static bool TryParseBool(string value, out bool result)
@@ -143,6 +160,17 @@ namespace WeekKalender.Core
                     result = false;
                     return false;
             }
+        }
+
+        static string ThemeBlock(string theme)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("; Thema: kleuren van de agenda");
+            sb.AppendLine(";   auto   = volgt de lichte of donkere modus van Windows");
+            sb.AppendLine(";   licht  = altijd crème met rood");
+            sb.AppendLine(";   donker = altijd warm zwart met rood");
+            sb.AppendLine("Thema=" + theme);
+            return sb.ToString();
         }
 
         public void Save()
@@ -167,6 +195,8 @@ namespace WeekKalender.Core
             sb.AppendLine();
             sb.AppendLine("; CacheMinuten: hoe lang opgehaalde afspraken worden bewaard voordat ze opnieuw worden gelezen (1-120)");
             sb.AppendLine("CacheMinuten=" + CacheMinutes.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine();
+            sb.Append(ThemeBlock(Theme));
 
             string temp = FilePath + ".tmp";
             File.WriteAllText(temp, sb.ToString(), new UTF8Encoding(false));

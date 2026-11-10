@@ -35,6 +35,9 @@ namespace WeekKalender.App
         int _iconWeek = -1, _iconSize = -1;
         bool _iconLight;
         DateTime _iconDate;
+        bool _iconFailureLogged;
+        int _lastToggleTick;
+        bool _toggledBefore;
         bool _disposed;
 
         public TrayApp(AppSettings settings)
@@ -49,7 +52,7 @@ namespace WeekKalender.App
             {
                 Log.Warn("Autostart omzetten: " + ex.Message);
             }
-            _theme = ThemeInfo.Read();
+            _theme = ThemeInfo.Read(settings.Theme);
 
             // Verborgen venster (geen message-only venster: die krijgen geen broadcasts als TaskbarCreated en WM_SETTINGCHANGE).
             var parameters = new HwndSourceParameters("WeekKalender")
@@ -108,8 +111,9 @@ namespace WeekKalender.App
             }
             if (_settings.ReloadIfChanged())
             {
-                Log.Info("Instellingen gewijzigd, bron: " + _settings.Source);
+                Log.Info("Instellingen gewijzigd, bron: " + _settings.Source + ", thema: " + _settings.Theme);
                 _service.Reconfigure(_settings);
+                Refresh(false);
             }
             _popup.ShowPopup(IconAnchor());
         }
@@ -149,7 +153,12 @@ namespace WeekKalender.App
                 int ev = (int)((long)lParam & 0xFFFF);
                 if (ev == NativeMethods.NIN_SELECT || ev == NativeMethods.NIN_KEYSELECT)
                 {
-                    TogglePopup();
+                    // Enter op het icoon en een dubbelklik geven de melding twee keer kort na elkaar: dat telt als één keer.
+                    int now = Environment.TickCount;
+                    bool repeat = _toggledBefore && unchecked((uint)(now - _lastToggleTick)) < 250;
+                    _lastToggleTick = now;
+                    _toggledBefore = true;
+                    if (!repeat) TogglePopup();
                 }
                 else if (ev == NativeMethods.WM_CONTEXTMENU)
                 {
@@ -204,7 +213,7 @@ namespace WeekKalender.App
         void Refresh(bool forceIcon)
         {
             if (_disposed) return;
-            ThemeInfo theme = ThemeInfo.Read();
+            ThemeInfo theme = ThemeInfo.Read(_settings.Theme);
             if (!theme.SameAs(_theme))
             {
                 _theme = theme;
@@ -241,7 +250,9 @@ namespace WeekKalender.App
             data.hIcon = icon;
             data.szTip = DutchText.Tooltip(today);
 
-            bool ok = _iconAdded && NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_MODIFY, ref data);
+            // Altijd eerst bijwerken proberen, ook na een mislukte poging: het icoon kan er dan nog gewoon staan,
+            // en toevoegen mislukt zolang het bestaat.
+            bool ok = NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_MODIFY, ref data);
             if (!ok)
             {
                 ok = NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_ADD, ref data);
@@ -250,11 +261,16 @@ namespace WeekKalender.App
                     data.uTimeoutOrVersion = NativeMethods.NOTIFYICON_VERSION_4;
                     NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_SETVERSION, ref data);
                 }
-                else
-                {
-                    // Bij het aanmelden is de taakbalk soms nog niet klaar; de timer probeert het opnieuw.
-                    Log.Warn("Icoon kon (nog) niet aan het systeemvak worden toegevoegd");
-                }
+            }
+            if (ok)
+            {
+                _iconFailureLogged = false;
+            }
+            else if (!_iconFailureLogged)
+            {
+                // Bij het aanmelden is de taakbalk soms nog niet klaar; de timer probeert het elke halve minuut opnieuw.
+                Log.Warn("Icoon kon (nog) niet in het systeemvak worden gezet; dit wordt opnieuw geprobeerd");
+                _iconFailureLogged = true;
             }
 
             if (_icon != IntPtr.Zero) NativeMethods.DestroyIcon(_icon);
@@ -355,12 +371,10 @@ namespace WeekKalender.App
             _disposed = true;
             _timer.Stop();
             _trimTimer.Stop();
-            if (_iconAdded)
-            {
-                NativeMethods.NOTIFYICONDATA data = NewIconData();
-                NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_DELETE, ref data);
-                _iconAdded = false;
-            }
+            // Altijd proberen te verwijderen; het icoon kan er staan terwijl de laatste update mislukte.
+            NativeMethods.NOTIFYICONDATA data = NewIconData();
+            NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_DELETE, ref data);
+            _iconAdded = false;
             try { _popup.Close(); }
             catch (Exception) { }
             _service.Dispose();

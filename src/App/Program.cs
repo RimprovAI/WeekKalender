@@ -50,7 +50,7 @@ namespace WeekKalender.App
             Log.Init(Path.Combine(folder, "log.txt"));
 
             // Een kleine popup heeft geen grafische kaart nodig; zonder Direct3D-apparaat scheelt dat flink in geheugen.
-            // De acrylic-achtergrond en schaduw tekent Windows zelf (DWM), die blijven gewoon werken.
+            // De schaduw en afgeronde hoeken tekent Windows zelf (DWM), die blijven gewoon werken.
             if (Environment.GetEnvironmentVariable("WEEKKALENDER_GPU") != "1")
                 System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
 
@@ -70,7 +70,17 @@ namespace WeekKalender.App
             TrayApp tray = null;
             app.Startup += (s, e) =>
             {
-                tray = new TrayApp(AppSettings.Load(Path.Combine(folder, "instellingen.ini")));
+                try
+                {
+                    tray = new TrayApp(AppSettings.Load(Path.Combine(folder, "instellingen.ini")));
+                }
+                catch (Exception ex)
+                {
+                    // Zonder tray-icoon zou het proces onzichtbaar blijven draaien en elke nieuwe start tegenhouden.
+                    Log.Error("Starten mislukt", ex);
+                    app.Shutdown(1);
+                    return;
+                }
                 ThreadPool.RegisterWaitForSingleObject(showSignal,
                     (state, timedOut) => app.Dispatcher.BeginInvoke(new Action(() => { if (tray != null) tray.ShowPopup(); })),
                     null, Timeout.Infinite, false);

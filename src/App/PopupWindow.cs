@@ -15,28 +15,43 @@ using WeekKalender.Providers;
 namespace WeekKalender.App
 {
     /// <summary>
-    /// De agenda-popup in Windows 11-stijl. Het venster wordt één keer gemaakt en daarna verborgen en opnieuw getoond,
-    /// zodat openen direct gaat.
+    /// De agenda-popup "Michalendar" in de eigen huisstijl. Het venster wordt één keer gemaakt en daarna
+    /// verborgen en opnieuw getoond, zodat openen direct gaat.
     /// </summary>
     internal sealed class PopupWindow : Window
     {
+        public const string AppTitle = "Michalendar";
+
         const double PopupWidth = 344;
-        const double PreferredHeight = 628;
-        const double MinPopupHeight = 380;
+        const double PreferredHeight = 676;
+        const double MinPopupHeight = 430;
         const double ScreenMargin = 12;
         const string LoadingText = "Afspraken laden…";
         const string SyncingText = "Outlook is net gestart en werkt de agenda nog bij.";
 
-        static readonly FontFamily UiFont = new FontFamily("Segoe UI");
+        // Lettertype Basis Grotesque Pro met Arial als terugval. Staat het merklettertype op de pc, dan wordt het gebruikt.
+        static readonly FontFamily UiFont = new FontFamily("Basis Grotesque Pro, Arial");
         static readonly FontFamily IconFont = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets");
+        static readonly string ChevronUp = ((char)0xE70E).ToString();
+        static readonly string ChevronDown = ((char)0xE70D).ToString();
+        static readonly CornerRadius Pill = new CornerRadius(16);
         static readonly HashSet<DateTime> NoDays = new HashSet<DateTime>();
+
+        /// <summary>Wat er op de meldingsregel staat; bepaalt wie hem mag overschrijven of wissen.</summary>
+        enum NoticeKind
+        {
+            None,
+            Info,            // lopende actie van de gebruiker
+            Error,           // fout bij een actie van de gebruiker (weekveld, afspraak openen)
+            Syncing,         // Outlook is net gestart
+            RefreshFailed,   // verversen mislukt, oudere afspraken blijven staan
+        }
 
         readonly AppointmentService _service;
         readonly DayCell[] _cells = new DayCell[MonthGrid.Days];
         readonly TextBlock[] _weekLabels = new TextBlock[MonthGrid.Rows];
         readonly DispatcherTimer _slowLoadTimer;
         readonly DispatcherTimer _syncRefreshTimer;
-        ThemeInfo _theme;
         Palette _p;
 
         MonthGrid _grid;
@@ -45,7 +60,7 @@ namespace WeekKalender.App
         ProviderResult _result;
         HashSet<DateTime> _busyDays = NoDays;
         bool _loading;
-        bool _noticeIsError;
+        NoticeKind _noticeKind;
         int _loadVersion;
         int _wheelDelta;
 
@@ -58,10 +73,9 @@ namespace WeekKalender.App
         public PopupWindow(AppointmentService service, ThemeInfo theme)
         {
             _service = service;
-            _theme = theme;
-            _p = Palette.Create(theme);
+            _p = Palette.Create(theme.PopupLight);
 
-            Title = "WeekKalender";
+            Title = AppTitle;
             Width = PopupWidth;
             Height = PreferredHeight;
             WindowStyle = WindowStyle.SingleBorderWindow;
@@ -71,13 +85,14 @@ namespace WeekKalender.App
             WindowStartupLocation = WindowStartupLocation.Manual;
             Left = -32000;
             Top = -32000;
+            Background = _p.Solid;
             FontFamily = UiFont;
             FontSize = 14;
             UseLayoutRounding = true;
             SnapsToDevicePixels = true;
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
 
-            // Randloos, maar met de schaduw, afgeronde hoeken en achtergrond van DWM.
+            // Randloos, maar met de schaduw en afgeronde hoeken van Windows (DWM).
             WindowChrome.SetWindowChrome(this, new WindowChrome
             {
                 CaptionHeight = 0,
@@ -102,7 +117,7 @@ namespace WeekKalender.App
                 if (IsVisible && _grid != null) LoadAppointments();
             };
 
-            SourceInitialized += (s, e) => ApplyBackdrop();
+            SourceInitialized += (s, e) => ApplyWindowStyle();
             Deactivated += OnDeactivated;
             PreviewKeyDown += OnPreviewKeyDown;
             BuildUi();
@@ -135,7 +150,7 @@ namespace WeekKalender.App
         public void ShowPopup(NativeMethods.POINT anchor)
         {
             _today = DateTime.Today;
-            ShowNotice(null, false);
+            ClearNotice();
             _weekBox.Text = "";
             _grid = null;
             ShowMonth(MonthGrid.For(_today), _today);
@@ -175,12 +190,13 @@ namespace WeekKalender.App
 
         public void ApplyTheme(ThemeInfo theme)
         {
-            _theme = theme;
-            _p = Palette.Create(theme);
-            string weekText = _weekBox != null ? _weekBox.Text : "";
+            if (_p.Dark == !theme.PopupLight) return;
+            _p = Palette.Create(theme.PopupLight);
+            string weekText = _weekBox.Text;
             BuildUi();
+            _noticeKind = NoticeKind.None;
             _weekBox.Text = weekText;
-            ApplyBackdrop();
+            ApplyWindowStyle();
             Render();
         }
 
@@ -202,7 +218,7 @@ namespace WeekKalender.App
             NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, position.X, position.Y, widthPx, heightPx, NativeMethods.SWP_NOACTIVATE);
         }
 
-        void ApplyBackdrop()
+        void ApplyWindowStyle()
         {
             IntPtr hwnd = new WindowInteropHelper(this).Handle;
             if (hwnd == IntPtr.Zero) return;
@@ -211,56 +227,22 @@ namespace WeekKalender.App
             int style = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_STYLE);
             if ((style & NativeMethods.WS_SYSMENU) != 0) NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_STYLE, style & ~NativeMethods.WS_SYSMENU);
 
-            int dark = _theme.SystemLight ? 0 : 1;
+            int dark = _p.Dark ? 1 : 0;
             NativeMethods.DwmSetWindowAttribute(hwnd, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
             int corners = NativeMethods.DWMWCP_ROUND;
             NativeMethods.DwmSetWindowAttribute(hwnd, NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref corners, sizeof(int));
 
-            // Acrylic zoals de flyouts van Windows 11 (vanaf 22H2), tenzij transparantie-effecten uit staan.
-            bool backdrop = false;
-            if (_theme.Transparency && OsBuild() >= 22621)
-            {
-                int type = NativeMethods.DWMSBT_TRANSIENTWINDOW;
-                backdrop = NativeMethods.DwmSetWindowAttribute(hwnd, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref type, sizeof(int)) == 0;
-            }
-            else
-            {
-                int none = NativeMethods.DWMSBT_NONE;
-                NativeMethods.DwmSetWindowAttribute(hwnd, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, ref none, sizeof(int));
-            }
-
+            // Effen huisstijlkleur als achtergrond (geen doorschijnend effect).
+            Background = _p.Solid;
             HwndSource source = HwndSource.FromHwnd(hwnd);
-            if (backdrop)
-            {
-                Background = Brushes.Transparent;
-                if (source != null && source.CompositionTarget != null) source.CompositionTarget.BackgroundColor = Colors.Transparent;
-            }
-            else
-            {
-                Background = _p.Solid;
-                if (source != null && source.CompositionTarget != null) source.CompositionTarget.BackgroundColor = _p.SolidColor;
-            }
-        }
-
-        static int OsBuild()
-        {
-            try
-            {
-                object value = Microsoft.Win32.Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion", "CurrentBuildNumber", "0");
-                int build;
-                return int.TryParse(value as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out build) ? build : 0;
-            }
-            catch (Exception)
-            {
-                return 0;
-            }
+            if (source != null && source.CompositionTarget != null) source.CompositionTarget.BackgroundColor = _p.SolidColor;
         }
 
         // ---------------------------------------------------------------- opbouw
 
         void BuildUi()
         {
-            var root = new Grid { Margin = new Thickness(12) };
+            var root = new Grid { Margin = new Thickness(12, 10, 12, 12) };
             foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto, GridLength.Auto })
                 root.RowDefinitions.Add(new RowDefinition { Height = height });
 
@@ -273,12 +255,20 @@ namespace WeekKalender.App
 
             Place(root, Separator(), 1);
 
-            var dayHeader = new DockPanel { Margin = new Thickness(4, 0, 4, 6) };
-            _dayWeek = Text(12, _p.Secondary);
-            _dayWeek.VerticalAlignment = VerticalAlignment.Center;
-            DockPanel.SetDock(_dayWeek, Dock.Right);
-            _dayTitle = Text(14, _p.Text, FontWeights.SemiBold);
-            dayHeader.Children.Add(_dayWeek);
+            var dayHeader = new DockPanel { Margin = new Thickness(4, 0, 2, 8) };
+            _dayWeek = Text(12, _p.Text, FontWeights.Bold);
+            var weekBadge = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = _p.ControlFill,
+                Padding = new Thickness(9, 3, 9, 3),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = _dayWeek,
+            };
+            DockPanel.SetDock(weekBadge, Dock.Right);
+            _dayTitle = Text(15, _p.Text, FontWeights.Bold);
+            _dayTitle.VerticalAlignment = VerticalAlignment.Center;
+            dayHeader.Children.Add(weekBadge);
             dayHeader.Children.Add(_dayTitle);
             Place(root, dayHeader, 2);
 
@@ -293,22 +283,40 @@ namespace WeekKalender.App
 
             Place(root, Separator(), 5);
             Place(root, BuildFooter(), 6);
-            Content = root;
+
+            var outer = new DockPanel();
+            UIElement titleBar = BuildTitleBar();
+            DockPanel.SetDock(titleBar, Dock.Top);
+            outer.Children.Add(titleBar);
+            outer.Children.Add(root);
+            Content = outer;
+        }
+
+        /// <summary>Titel in wit op merkrood, zoals het woordmerk.</summary>
+        UIElement BuildTitleBar()
+        {
+            TextBlock title = Text(18, _p.OnAccent, FontWeights.Bold);
+            title.Text = AppTitle;
+            title.VerticalAlignment = VerticalAlignment.Center;
+            title.Margin = new Thickness(20, 0, 20, 1);
+            return new Border { Height = 46, Background = _p.AccentFill, Child = title };
         }
 
         UIElement BuildHeader()
         {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            _monthTitle = Text(14, _p.Text, FontWeights.SemiBold);
+            _monthTitle = Text(16, _p.Text, FontWeights.Bold);
             _monthTitle.VerticalAlignment = VerticalAlignment.Center;
             _monthTitle.Margin = new Thickness(8, 0, 0, 0);
             Place(grid, _monthTitle, 0, 0);
-            Place(grid, IconButton("", "Vorige maand", () => ChangeMonth(-1)), 0, 1);
-            Place(grid, IconButton("", "Volgende maand", () => ChangeMonth(1)), 0, 2);
+            FlatButton previous = IconButton(ChevronUp, "Vorige maand", () => ChangeMonth(-1));
+            previous.Margin = new Thickness(0, 0, 6, 0);
+            Place(grid, previous, 0, 1);
+            Place(grid, IconButton(ChevronDown, "Volgende maand", () => ChangeMonth(1)), 0, 2);
             return grid;
         }
 
@@ -317,7 +325,7 @@ namespace WeekKalender.App
             Grid grid = EightColumns(1, 28);
             for (int c = 0; c < 8; c++)
             {
-                TextBlock label = Text(12, c == 0 ? _p.Dimmed : _p.Text);
+                TextBlock label = Text(12, c == 0 ? _p.WeekNumber : _p.Secondary, FontWeights.Bold);
                 label.Text = c == 0 ? "wk" : DutchText.DayShort(c - 1);
                 label.HorizontalAlignment = HorizontalAlignment.Center;
                 label.VerticalAlignment = VerticalAlignment.Center;
@@ -331,7 +339,7 @@ namespace WeekKalender.App
             Grid grid = EightColumns(MonthGrid.Rows, 40);
             for (int r = 0; r < MonthGrid.Rows; r++)
             {
-                TextBlock week = Text(12, _p.Dimmed);
+                TextBlock week = Text(12, _p.WeekNumber);
                 week.HorizontalAlignment = HorizontalAlignment.Center;
                 week.VerticalAlignment = VerticalAlignment.Center;
                 _weekLabels[r] = week;
@@ -375,7 +383,7 @@ namespace WeekKalender.App
             };
             _scroll.ScrollChanged += (s, e) => UpdateThumb();
 
-            // Dun schuifbalkje zoals in Windows 11, alleen zichtbaar als de lijst niet past.
+            // Dun schuifbalkje, alleen zichtbaar als de lijst niet past.
             var track = new Canvas { Margin = new Thickness(3, 2, 0, 2) };
             _thumb = new Border { Width = 3, CornerRadius = new CornerRadius(1.5), Background = _p.Dimmed, Visibility = Visibility.Collapsed };
             track.Children.Add(_thumb);
@@ -393,7 +401,7 @@ namespace WeekKalender.App
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            Place(grid, TextButton("Vandaag", GoToToday), 0, 0);
+            Place(grid, TextButton("Vandaag", GoToToday, false), 0, 0);
 
             _weekBox = new TextBox
             {
@@ -412,46 +420,46 @@ namespace WeekKalender.App
             _weekBox.TextChanged += (s, e) =>
             {
                 _weekPlaceholder.Visibility = _weekBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-                if (_noticeIsError) ShowNotice(null, false);
+                if (_noticeKind == NoticeKind.Error) ClearNotice();
             };
             _weekBox.GotKeyboardFocus += (s, e) => StyleWeekBox(true);
             _weekBox.LostKeyboardFocus += (s, e) => StyleWeekBox(false);
 
-            _weekPlaceholder = Text(13, _p.Dimmed);
+            _weekPlaceholder = Text(12, _p.Dimmed);
             _weekPlaceholder.Text = "Weeknummer";
             _weekPlaceholder.IsHitTestVisible = false;
             _weekPlaceholder.VerticalAlignment = VerticalAlignment.Center;
-            _weekPlaceholder.Margin = new Thickness(10, 0, 6, 0);
+            _weekPlaceholder.Margin = new Thickness(14, 0, 8, 0);
 
             var boxContent = new Grid();
             boxContent.Children.Add(_weekPlaceholder);
             boxContent.Children.Add(_weekBox);
             _weekBoxBorder = new Border
             {
-                Width = 104,
+                Width = 108,
                 Height = 32,
-                CornerRadius = new CornerRadius(4),
-                Background = _p.ControlFill,
+                CornerRadius = Pill,
+                Background = _p.FieldFill,
                 Child = boxContent,
                 Margin = new Thickness(0, 0, 6, 0),
             };
             StyleWeekBox(false);
             Place(grid, _weekBoxBorder, 0, 2);
-            Place(grid, TextButton("Ga naar week", GoToWeek), 0, 3);
+            Place(grid, TextButton("Ga naar week", GoToWeek, true), 0, 3);
             return grid;
         }
 
         void StyleWeekBox(bool focused)
         {
-            _weekBoxBorder.BorderBrush = focused ? _p.AccentFill : _p.ControlStroke;
-            _weekBoxBorder.BorderThickness = focused ? new Thickness(1, 1, 1, 2) : new Thickness(1);
+            _weekBoxBorder.BorderBrush = focused ? _p.AccentFill : _p.FieldStroke;
+            _weekBoxBorder.BorderThickness = new Thickness(focused ? 1.5 : 1);
         }
 
         static ControlTemplate PlainTextBoxTemplate()
         {
             var template = new ControlTemplate(typeof(TextBox));
             var host = new FrameworkElementFactory(typeof(ScrollViewer), "PART_ContentHost");
-            host.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 0, 6, 0));
+            host.SetValue(FrameworkElement.MarginProperty, new Thickness(12, 0, 8, 0));
             host.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
             host.SetValue(UIElement.FocusableProperty, false);
             host.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Hidden);
@@ -460,43 +468,46 @@ namespace WeekKalender.App
             return template;
         }
 
+        /// <summary>Ronde knop met een pijltje, in de stijl van de pilvormige knoppen.</summary>
         FlatButton IconButton(string glyph, string name, Action click)
         {
             var button = new FlatButton
             {
                 Width = 32,
                 Height = 32,
+                CornerRadius = Pill,
                 Child = new TextBlock
                 {
                     Text = glyph,
                     FontFamily = IconFont,
-                    FontSize = 12,
-                    Foreground = _p.Secondary,
+                    FontSize = 11,
+                    Foreground = _p.Text,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                 },
             };
-            button.SetBrushes(Brushes.Transparent, _p.Hover, _p.Pressed);
+            button.SetBrushes(_p.ControlFill, _p.ControlHover, _p.ControlPressed);
             button.Click += (s, e) => click();
             AutomationProperties.SetName(button, name);
             return button;
         }
 
-        FlatButton TextButton(string label, Action click)
+        /// <summary>Pilvormige knop: rood met wit voor de hoofdactie, zand voor de rest.</summary>
+        FlatButton TextButton(string label, Action click, bool primary)
         {
-            TextBlock text = Text(13, _p.Text);
+            TextBlock text = Text(13, primary ? _p.OnAccent : _p.Text, FontWeights.Bold);
             text.Text = label;
             text.HorizontalAlignment = HorizontalAlignment.Center;
             text.VerticalAlignment = VerticalAlignment.Center;
             var button = new FlatButton
             {
                 Height = 32,
-                Padding = new Thickness(12, 0, 12, 0),
-                BorderThickness = new Thickness(1),
-                BorderBrush = _p.ControlStroke,
+                CornerRadius = Pill,
+                Padding = new Thickness(14, 0, 14, 0),
                 Child = text,
             };
-            button.SetBrushes(_p.ControlFill, _p.ControlHover, _p.ControlPressed);
+            if (primary) button.SetBrushes(_p.AccentFill, _p.AccentHover, _p.AccentPressed);
+            else button.SetBrushes(_p.ControlFill, _p.ControlHover, _p.ControlPressed);
             button.Click += (s, e) => click();
             AutomationProperties.SetName(button, label);
             return button;
@@ -538,6 +549,8 @@ namespace WeekKalender.App
         void ChangeMonth(int delta)
         {
             MonthGrid grid = _grid.AddMonths(delta);
+            // Zelfde grenzen als het weekveld en het selecteren van een dag.
+            if (grid.Year < WeekInput.MinYear || grid.Year > WeekInput.MaxYear) return;
             // In de maand van vandaag is vandaag geselecteerd, anders de 1e.
             DateTime select = grid.IsInMonth(_today) ? _today : new DateTime(grid.Year, grid.Month, 1);
             ShowMonth(grid, select);
@@ -545,7 +558,7 @@ namespace WeekKalender.App
 
         void Select(DateTime date)
         {
-            if (date.Year < 1900 || date.Year > 2200) return;
+            if (date.Year < WeekInput.MinYear || date.Year > WeekInput.MaxYear) return;
             if (_grid != null && _grid.IsInMonth(date))
             {
                 _selected = date.Date;
@@ -560,7 +573,7 @@ namespace WeekKalender.App
         void GoToToday()
         {
             _today = DateTime.Today;
-            ShowNotice(null, false);
+            ClearNotice();
             ShowMonth(MonthGrid.For(_today), _today);
         }
 
@@ -570,12 +583,12 @@ namespace WeekKalender.App
             WeekInputResult input = WeekInput.Parse(_weekBox.Text, defaultYear);
             if (!input.Ok)
             {
-                ShowNotice(input.Error, true);
+                ShowNotice(input.Error, NoticeKind.Error);
                 _weekBox.Focus();
                 _weekBox.SelectAll();
                 return;
             }
-            ShowNotice(null, false);
+            ClearNotice();
             DateTime monday = IsoWeek.FirstDayOfWeek(input.Year, input.Week);
             ShowMonth(MonthGrid.For(monday), monday);
         }
@@ -660,7 +673,7 @@ namespace WeekKalender.App
                 Render();
                 if (fresh)
                 {
-                    ShowSyncState(cached);
+                    UpdateLoadNotice(cached, false);
                     Prefetch(grid);
                     return;
                 }
@@ -687,26 +700,32 @@ namespace WeekKalender.App
             if (version != _loadVersion) return;
 
             _slowLoadTimer.Stop();
-            // Mislukt verversen terwijl er al (oudere) afspraken staan: die laten staan.
-            if (result.IsOk || _result == null || !_result.IsOk) _result = result;
+            // Mislukt verversen terwijl er al (oudere) afspraken staan: die laten staan en het melden.
+            bool keptOld = !result.IsOk && _result != null && _result.IsOk;
+            if (!keptOld) _result = result;
             _loading = false;
             Render();
-            ShowSyncState(result);
+            UpdateLoadNotice(result, keptOld);
             if (result.IsOk) Prefetch(grid);
         }
 
-        void ShowSyncState(ProviderResult result)
+        /// <summary>Zet of wist de melding over het laden. Een melding over een actie van de gebruiker blijft staan.</summary>
+        void UpdateLoadNotice(ProviderResult result, bool keptOld)
         {
+            bool free = _noticeKind == NoticeKind.None || _noticeKind == NoticeKind.Syncing || _noticeKind == NoticeKind.RefreshFailed;
             if (result.IsOk && result.Provisional)
             {
-                // Een foutmelding (bijv. van het weekveld) gaat voor.
-                if (!_noticeIsError || _notice.Visibility != Visibility.Visible) ShowNotice(SyncingText, false);
+                if (free) ShowNotice(SyncingText, NoticeKind.Syncing);
                 _syncRefreshTimer.Stop();
                 _syncRefreshTimer.Start();
             }
-            else if (_notice.Text == SyncingText)
+            else if (keptOld)
             {
-                ShowNotice(null, false);
+                if (free) ShowNotice("Niet bijgewerkt. " + result.Message, NoticeKind.RefreshFailed);
+            }
+            else if (_noticeKind == NoticeKind.Syncing || _noticeKind == NoticeKind.RefreshFailed)
+            {
+                ClearNotice();
             }
         }
 
@@ -729,7 +748,7 @@ namespace WeekKalender.App
 
         async void OpenAppointment(Appointment appointment)
         {
-            ShowNotice("Afspraak wordt geopend in Outlook…", false);
+            ShowNotice("Afspraak wordt geopend in Outlook…", NoticeKind.Info);
             NativeMethods.AllowSetForegroundWindow(NativeMethods.ASFW_ANY);
             ProviderResult result;
             try
@@ -743,12 +762,12 @@ namespace WeekKalender.App
             }
             if (result.IsOk)
             {
-                ShowNotice(null, false);
+                ClearNotice();
                 HidePopup();
             }
             else
             {
-                ShowNotice(result.Message, true);
+                ShowNotice(result.Message, NoticeKind.Error);
             }
         }
 
@@ -765,8 +784,8 @@ namespace WeekKalender.App
             {
                 TextBlock label = _weekLabels[r];
                 label.Text = _grid.WeekNumber(r).ToString(CultureInfo.InvariantCulture);
-                label.Foreground = r == selectedRow ? _p.AccentText : _p.Dimmed;
-                label.FontWeight = r == selectedRow ? FontWeights.SemiBold : FontWeights.Normal;
+                label.Foreground = r == selectedRow ? _p.AccentText : _p.WeekNumber;
+                label.FontWeight = r == selectedRow ? FontWeights.Bold : FontWeights.Normal;
             }
             for (int i = 0; i < _cells.Length; i++)
             {
@@ -789,10 +808,10 @@ namespace WeekKalender.App
             cell.Circle.Stroke = isSelected && !isToday ? _p.AccentFill : null;
             cell.InnerRing.Stroke = isSelected && isToday ? _p.OnAccent : null;
             cell.Label.Foreground = isToday ? _p.OnAccent : inMonth ? _p.Text : _p.Dimmed;
-            cell.Label.FontWeight = isToday ? FontWeights.SemiBold : FontWeights.Normal;
+            cell.Label.FontWeight = isToday ? FontWeights.Bold : FontWeights.Normal;
             bool busy = _busyDays.Contains(date);
             cell.Dot.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
-            cell.Dot.Fill = isToday ? _p.OnAccent : inMonth ? _p.Secondary : _p.Dimmed;
+            cell.Dot.Fill = isToday ? _p.OnAccent : inMonth ? _p.AccentFill : _p.Dimmed;
             AutomationProperties.SetName(cell, DutchText.LongDate(date) + (busy ? ", met afspraken" : ""));
         }
 
@@ -820,6 +839,7 @@ namespace WeekKalender.App
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(UpdateThumb));
         }
 
+        /// <summary>Eén afspraak als kaartje met een rode streep.</summary>
         UIElement BuildItem(Appointment appointment)
         {
             var bar = new Border
@@ -827,7 +847,7 @@ namespace WeekKalender.App
                 Width = 3,
                 CornerRadius = new CornerRadius(1.5),
                 Background = _p.AccentFill,
-                Margin = new Thickness(0, 2, 10, 2),
+                Margin = new Thickness(0, 1, 10, 1),
             };
             DockPanel.SetDock(bar, Dock.Left);
 
@@ -835,7 +855,7 @@ namespace WeekKalender.App
             TextBlock time = Text(12, _p.Secondary);
             time.Text = DutchText.TimeRange(appointment, _selected);
             lines.Children.Add(time);
-            TextBlock subject = Text(14, _p.Text);
+            TextBlock subject = Text(14, _p.Text, FontWeights.Bold);
             subject.Text = appointment.Subject;
             subject.TextWrapping = TextWrapping.Wrap;
             subject.TextTrimming = TextTrimming.None;
@@ -853,8 +873,14 @@ namespace WeekKalender.App
             row.Children.Add(bar);
             row.Children.Add(lines);
 
-            var button = new FlatButton { Child = row, Padding = new Thickness(6, 6, 8, 6), Margin = new Thickness(0, 0, 0, 2) };
-            button.SetBrushes(Brushes.Transparent, _p.Hover, _p.Pressed);
+            var button = new FlatButton
+            {
+                Child = row,
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(9, 7, 10, 7),
+                Margin = new Thickness(0, 0, 0, 6),
+            };
+            button.SetBrushes(_p.Card, _p.CardHover, _p.Pressed);
             if (_service.CanOpen(appointment))
             {
                 button.Click += (s, e) => OpenAppointment(appointment);
@@ -874,13 +900,19 @@ namespace WeekKalender.App
             _status.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
         }
 
-        void ShowNotice(string text, bool isError)
+        void ShowNotice(string text, NoticeKind kind)
         {
-            if (_notice == null) return;
-            _noticeIsError = isError && !string.IsNullOrEmpty(text);
+            _noticeKind = kind;
             _notice.Text = text ?? "";
-            _notice.Foreground = isError ? _p.Error : _p.Secondary;
+            _notice.Foreground = kind == NoticeKind.Error || kind == NoticeKind.RefreshFailed ? _p.Error : _p.Secondary;
             _notice.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        void ClearNotice()
+        {
+            _noticeKind = NoticeKind.None;
+            _notice.Text = "";
+            _notice.Visibility = Visibility.Collapsed;
         }
 
         void UpdateThumb()

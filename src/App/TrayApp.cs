@@ -38,20 +38,14 @@ namespace WeekKalender.App
         bool _iconFailureLogged;
         int _lastToggleTick;
         bool _toggledBefore;
+        bool _refreshPending;
+        bool _clockChanged;
         bool _disposed;
 
         public TrayApp(AppSettings settings)
         {
             _settings = settings;
             _autostart = new Autostart(Assembly.GetEntryAssembly().Location);
-            try
-            {
-                if (_autostart.MigrateFromRunKey()) Log.Info("Autostart omgezet van Run-sleutel naar map Opstarten");
-            }
-            catch (Exception ex)
-            {
-                Log.Warn("Autostart omzetten: " + ex.Message);
-            }
             _theme = ThemeInfo.Read(settings.Theme);
 
             // Verborgen venster (geen message-only venster: die krijgen geen broadcasts als TaskbarCreated en WM_SETTINGCHANGE).
@@ -65,15 +59,16 @@ namespace WeekKalender.App
             _window = new HwndSource(parameters);
             _window.AddHook(WndProc);
             _taskbarCreatedMessage = NativeMethods.RegisterWindowMessage("TaskbarCreated");
-            NativeMethods.ApplyMenuTheme(!_theme.SystemLight);
 
             _service = AppointmentService.FromSettings(settings);
             _popup = new PopupWindow(_service, _theme);
-            UpdateIcon(true);
 
-            _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(30) };
+            // Geen vaste polling: de timer loopt tot vlak na middernacht (met een vangnet van hooguit 10 minuten voor
+            // het geval een ontwaak-melding gemist wordt), of kort als het icoon nog niet geplaatst kon worden.
+            _timer = new DispatcherTimer(DispatcherPriority.Background);
             _timer.Tick += (s, e) => Refresh(false);
-            _timer.Start();
+            UpdateIcon(true);
+            ScheduleTimer();
 
             // Als de popup een tijdje dicht is, ongebruikt geheugen teruggeven aan Windows.
             _trimTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(20) };
@@ -174,40 +169,50 @@ namespace WeekKalender.App
                 // Verkenner is herstart: icoon opnieuw toevoegen.
                 _iconAdded = false;
                 UpdateIcon(true);
+                ScheduleTimer();
                 return IntPtr.Zero;
             }
 
             switch (message)
             {
                 case NativeMethods.WM_TIMECHANGE:
+                    _clockChanged = true;
+                    RefreshSoon();
+                    break;
                 case NativeMethods.WM_SETTINGCHANGE:
                 case NativeMethods.WM_DISPLAYCHANGE:
                 case NativeMethods.WM_DPICHANGED:
-                    Later(() =>
-                    {
-                        TimeZoneInfo.ClearCachedData();
-                        CultureInfo.CurrentCulture.ClearCachedData();
-                        Refresh(true);
-                    });
+                    RefreshSoon();
                     break;
                 case NativeMethods.WM_POWERBROADCAST:
                     int power = (int)(long)wParam;
                     if (power == NativeMethods.PBT_APMRESUMEAUTOMATIC || power == NativeMethods.PBT_APMRESUMESUSPEND)
                     {
-                        Later(() =>
-                        {
-                            _service.InvalidateCache();
-                            Refresh(true);
-                        });
+                        _clockChanged = true;
+                        RefreshSoon();
                     }
                     break;
             }
             return IntPtr.Zero;
         }
 
-        void Later(Action action)
+        /// <summary>Windows stuurt instellingsmeldingen vaak in reeksen; die worden samengenomen tot één keer bijwerken.</summary>
+        void RefreshSoon()
         {
-            _window.Dispatcher.BeginInvoke(DispatcherPriority.Background, action);
+            if (_refreshPending || _disposed) return;
+            _refreshPending = true;
+            _window.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                _refreshPending = false;
+                if (_clockChanged)
+                {
+                    _clockChanged = false;
+                    TimeZoneInfo.ClearCachedData();
+                    CultureInfo.CurrentCulture.ClearCachedData();
+                    _service.InvalidateCache();
+                }
+                Refresh(false);
+            }));
         }
 
         void Refresh(bool forceIcon)
@@ -217,12 +222,22 @@ namespace WeekKalender.App
             if (!theme.SameAs(_theme))
             {
                 _theme = theme;
-                NativeMethods.ApplyMenuTheme(!theme.SystemLight);
                 _popup.ApplyTheme(theme);
                 forceIcon = true;
             }
             UpdateIcon(forceIcon);
             _popup.OnTick();
+            ScheduleTimer();
+        }
+
+        void ScheduleTimer()
+        {
+            DateTime now = DateTime.Now;
+            TimeSpan untilMidnight = now.Date.AddDays(1) - now + TimeSpan.FromSeconds(2);
+            TimeSpan limit = _iconAdded ? TimeSpan.FromMinutes(10) : TimeSpan.FromSeconds(5);
+            _timer.Stop();
+            _timer.Interval = untilMidnight < limit ? untilMidnight : limit;
+            _timer.Start();
         }
 
         void UpdateIcon(bool force)
@@ -268,7 +283,7 @@ namespace WeekKalender.App
             }
             else if (!_iconFailureLogged)
             {
-                // Bij het aanmelden is de taakbalk soms nog niet klaar; de timer probeert het elke halve minuut opnieuw.
+                // Bij het aanmelden is de taakbalk soms nog niet klaar; de timer probeert het om de paar seconden opnieuw.
                 Log.Warn("Icoon kon (nog) niet in het systeemvak worden gezet; dit wordt opnieuw geprobeerd");
                 _iconFailureLogged = true;
             }

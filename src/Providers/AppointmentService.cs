@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using WeekKalender.Core;
@@ -12,12 +13,14 @@ namespace WeekKalender.Providers
     public sealed class AppointmentService : IDisposable
     {
         static readonly TimeSpan FailureLifetime = TimeSpan.FromSeconds(20);
+        static readonly TimeSpan IdleCheckInterval = TimeSpan.FromMinutes(1);
 
         readonly object _gate = new object();
         readonly StaWorker _worker;
         readonly AppointmentCache _cache;
         readonly TimeSpan _timeout;
         readonly Timer _idleTimer;
+        readonly Dictionary<DateTime, Task<ProviderResult>> _inFlight = new Dictionary<DateTime, Task<ProviderResult>>();
         IAppointmentProvider _primary;
         IAppointmentProvider _fallback;
         string _unconfiguredMessage;
@@ -32,7 +35,8 @@ namespace WeekKalender.Providers
             _timeout = timeout;
             _cache = new AppointmentCache(cacheLifetime, FailureLifetime, now);
             _worker = new StaWorker("Agendalezer", useMessageFilter: true);
-            _idleTimer = new Timer(_ => ReleaseIdle(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+            // Loopt alleen zolang het programma een zelf gestart Outlook vasthoudt; anders staat hij stil.
+            _idleTimer = new Timer(_ => ReleaseIdle(), null, Timeout.Infinite, Timeout.Infinite);
         }
 
         public static AppointmentService FromSettings(AppSettings settings)
@@ -83,12 +87,34 @@ namespace WeekKalender.Providers
             _cache.Clear();
         }
 
-        public async Task<ProviderResult> GetAsync(DateTime start, DateTime end)
+        public Task<ProviderResult> GetAsync(DateTime start, DateTime end)
         {
             ProviderResult cached;
             bool fresh;
-            if (_cache.TryGet(start, out cached, out fresh) && fresh) return cached;
+            if (_cache.TryGet(start, out cached, out fresh) && fresh) return Task.FromResult(cached);
 
+            // Dezelfde maand wordt nooit twee keer tegelijk opgehaald (bijv. vooruit laden en ernaartoe bladeren).
+            Task<ProviderResult> task;
+            lock (_gate)
+            {
+                if (_inFlight.TryGetValue(start, out task) && !task.IsCompleted) return task;
+                task = FetchAsync(start, end);
+                if (task.IsCompleted) return task;
+                _inFlight[start] = task;
+            }
+            task.ContinueWith(t =>
+            {
+                lock (_gate)
+                {
+                    Task<ProviderResult> current;
+                    if (_inFlight.TryGetValue(start, out current) && current == t) _inFlight.Remove(start);
+                }
+            }, TaskScheduler.Default);
+            return task;
+        }
+
+        async Task<ProviderResult> FetchAsync(DateTime start, DateTime end)
+        {
             IAppointmentProvider primary, fallback;
             string message;
             lock (_gate)
@@ -102,7 +128,12 @@ namespace WeekKalender.Providers
             // Zit de vorige opdracht nog vast, dan niet nog een opdracht achter in de rij zetten.
             if (_worker.IsBusyLongerThan(_timeout)) return ProviderResult.TimedOut(TimeoutMessage(primary));
 
-            Task<ProviderResult> work = _worker.Run(() => FetchWithFallback(primary, fallback, start, end));
+            Task<ProviderResult> work = _worker.Run(() =>
+            {
+                ProviderResult fetched = FetchWithFallback(primary, fallback, start, end);
+                ScheduleIdleCheck(primary);
+                return fetched;
+            });
             Task finished = await Task.WhenAny(work, Task.Delay(_timeout)).ConfigureAwait(true);
             ProviderResult result;
             if (finished != work)
@@ -121,7 +152,7 @@ namespace WeekKalender.Providers
                 }
                 catch (Exception ex)
                 {
-                    Log.Error("Afspraken ophalen", ex);
+                    Log.Error("Afspraken ophalen: " + ex.GetType().Name);
                     result = ProviderResult.Failed("Afspraken konden niet worden geladen.");
                 }
             }
@@ -136,7 +167,12 @@ namespace WeekKalender.Providers
             if (outlook == null || appointment.OpenKey == null) return ProviderResult.NotAvailable("Deze afspraak kan niet worden geopend.");
             if (_worker.IsBusyLongerThan(_timeout)) return ProviderResult.TimedOut(TimeoutMessage(outlook));
 
-            Task<ProviderResult> work = _worker.Run(() => outlook.Open(appointment));
+            Task<ProviderResult> work = _worker.Run(() =>
+            {
+                ProviderResult opened = outlook.Open(appointment);
+                ScheduleIdleCheck(outlook);
+                return opened;
+            });
             Task finished = await Task.WhenAny(work, Task.Delay(_timeout)).ConfigureAwait(true);
             if (finished != work) return ProviderResult.TimedOut(TimeoutMessage(outlook));
             try
@@ -145,7 +181,7 @@ namespace WeekKalender.Providers
             }
             catch (Exception ex)
             {
-                Log.Error("Afspraak openen", ex);
+                Log.Error("Afspraak openen: " + ex.GetType().Name);
                 return ProviderResult.Failed("De afspraak kon niet worden geopend.");
             }
         }
@@ -169,7 +205,7 @@ namespace WeekKalender.Providers
             }
             catch (Exception ex)
             {
-                Log.Error(provider.Name + " ophalen", ex);
+                Log.Error(provider.Name + " ophalen: " + ex.GetType().Name);
                 return ProviderResult.Failed("Afspraken konden niet worden geladen: " + ex.Message);
             }
         }
@@ -181,19 +217,33 @@ namespace WeekKalender.Providers
                 : "De agenda reageert niet op tijd.";
         }
 
+        /// <summary>Op de werkthread: zet de controle 'Outlook loslaten' alleen aan als er iets vastgehouden wordt.</summary>
+        void ScheduleIdleCheck(IAppointmentProvider provider)
+        {
+            var outlook = provider as OutlookComProvider;
+            if (outlook == null || !outlook.HoldsOutlook || _disposed) return;
+            try { _idleTimer.Change(IdleCheckInterval, Timeout.InfiniteTimeSpan); }
+            catch (ObjectDisposedException) { }
+        }
+
         void ReleaseIdle()
         {
-            if (_disposed || _worker.IsBusyLongerThan(TimeSpan.Zero)) return;
+            if (_disposed) return;
             OutlookComProvider outlook;
             lock (_gate) outlook = _primary as OutlookComProvider;
-            if (outlook != null) _worker.Post(outlook.ReleaseIfIdle);
+            if (outlook == null) return;
+            _worker.Post(() =>
+            {
+                outlook.ReleaseIfIdle();
+                ScheduleIdleCheck(outlook);
+            });
         }
 
         static void DisposeQuietly(IDisposable disposable)
         {
             if (disposable == null) return;
             try { disposable.Dispose(); }
-            catch (Exception ex) { Log.Warn("Opruimen: " + ex.Message); }
+            catch (Exception ex) { Log.Warn("Opruimen: " + ex.GetType().Name); }
         }
 
         public void Dispose()

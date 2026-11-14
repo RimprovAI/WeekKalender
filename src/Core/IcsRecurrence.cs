@@ -111,7 +111,7 @@ namespace WeekKalender.Core
 
     internal static class RecurrenceExpander
     {
-        const int MaxPeriods = 200000;
+        const int MaxPeriods = 100000;
 
         /// <summary>
         /// Begintijden (wandklok, zelfde soort tijd als dtStart) van alle voorkomens, oplopend, tot en met <paramref name="limit"/>.
@@ -119,9 +119,19 @@ namespace WeekKalender.Core
         /// </summary>
         public static IEnumerable<DateTime> Occurrences(DateTime dtStart, RecurrenceRule rule, DateTime? until, DateTime limit)
         {
+            return Occurrences(dtStart, rule, until, dtStart, limit);
+        }
+
+        /// <summary>
+        /// Als hierboven, maar slaat perioden over die ruim voor <paramref name="from"/> liggen. Een reeks die jaren geleden
+        /// begon, wordt zo niet bij elke maand opnieuw vanaf het begin doorlopen. Bij COUNT kan dat niet: dan moet er geteld worden.
+        /// </summary>
+        public static IEnumerable<DateTime> Occurrences(DateTime dtStart, RecurrenceRule rule, DateTime? until, DateTime from, DateTime limit)
+        {
             int emitted = 0;
             TimeSpan time = dtStart.TimeOfDay;
-            for (int p = 0; p < MaxPeriods; p++)
+            int first = rule.Count.HasValue ? 0 : FirstPeriod(dtStart, rule, from);
+            for (int p = first; p < first + MaxPeriods; p++)
             {
                 DateTime periodStart = DateTime.MaxValue;
                 List<DateTime> days = null;
@@ -176,6 +186,31 @@ namespace WeekKalender.Core
                     yield return candidate;
                 }
             }
+        }
+
+        /// <summary>Nummer van de periode die één periode voor 'from' ligt (nooit negatief).</summary>
+        static int FirstPeriod(DateTime dtStart, RecurrenceRule rule, DateTime from)
+        {
+            if (from <= dtStart) return 0;
+            long periods;
+            switch (rule.Freq)
+            {
+                case "DAILY":
+                    periods = (long)(from.Date - dtStart.Date).TotalDays / rule.Interval;
+                    break;
+                case "WEEKLY":
+                    periods = (long)(from.Date - StartOfWeek(dtStart.Date, rule.WeekStart)).TotalDays / (7L * rule.Interval);
+                    break;
+                case "MONTHLY":
+                    periods = ((from.Year - dtStart.Year) * 12L + from.Month - dtStart.Month) / rule.Interval;
+                    break;
+                case "YEARLY":
+                    periods = (from.Year - dtStart.Year) / rule.Interval;
+                    break;
+                default:
+                    return 0;
+            }
+            return (int)Math.Max(0, Math.Min(int.MaxValue / 2, periods - 1));
         }
 
         static DateTime StartOfWeek(DateTime date, DayOfWeek weekStart)

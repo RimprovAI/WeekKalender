@@ -305,13 +305,7 @@ namespace WeekKalender.Tests
 
         static Autostart Make(string exe, string folder)
         {
-            return new Autostart(exe, "WeekKalender", folder, TestRoot + @"\Run", TestRoot + @"\ApprovedRun", TestRoot + @"\ApprovedFolder");
-        }
-
-        static string RunValue()
-        {
-            using (var run = Registry.CurrentUser.OpenSubKey(TestRoot + @"\Run"))
-                return run == null ? null : run.GetValue("WeekKalender") as string;
+            return new Autostart(exe, "WeekKalender", folder, TestRoot + @"\ApprovedFolder");
         }
 
         static void WithSandbox(Action<string, string> test)
@@ -354,35 +348,6 @@ namespace WeekKalender.Tests
                 autostart.Disable();
                 Assert.False(autostart.IsEnabled(), "uit");
                 Assert.False(File.Exists(Path.Combine(folder, "WeekKalender.lnk")), "snelkoppeling verwijderd");
-            });
-        }
-
-        public static void OudeRunWaardeWordtOmgezet()
-        {
-            WithSandbox((exe, folder) =>
-            {
-                using (var run = Registry.CurrentUser.CreateSubKey(TestRoot + @"\Run"))
-                    run.SetValue("WeekKalender", "\"" + exe + "\"");
-                var autostart = Make(exe, folder);
-                Assert.True(autostart.MigrateFromRunKey(), "omgezet");
-                Assert.True(autostart.IsEnabled(), "nu aan via map Opstarten");
-                Assert.Equal(null, RunValue(), "Run-waarde opgeruimd");
-                Assert.False(autostart.MigrateFromRunKey(), "tweede keer niets te doen");
-            });
-        }
-
-        public static void UitgeschakeldeRunWaardeBlijftUit()
-        {
-            WithSandbox((exe, folder) =>
-            {
-                using (var run = Registry.CurrentUser.CreateSubKey(TestRoot + @"\Run"))
-                    run.SetValue("WeekKalender", "\"" + exe + "\"");
-                using (var approved = Registry.CurrentUser.CreateSubKey(TestRoot + @"\ApprovedRun"))
-                    approved.SetValue("WeekKalender", DisabledFlag, RegistryValueKind.Binary);
-                var autostart = Make(exe, folder);
-                Assert.True(autostart.MigrateFromRunKey(), "opgeruimd");
-                Assert.False(autostart.IsEnabled(), "niet stiekem aangezet");
-                Assert.Equal(null, RunValue(), "Run-waarde opgeruimd");
             });
         }
     }

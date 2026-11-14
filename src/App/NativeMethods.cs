@@ -202,22 +202,17 @@ namespace WeekKalender.App
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-        // Ongedocumenteerd maar sinds Windows 10 1903 stabiel: donkere contextmenu's voor dit proces.
-        [DllImport("uxtheme.dll", EntryPoint = "#135")]
-        static extern int SetPreferredAppMode(int mode);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool SetDllDirectory(string path);
 
-        [DllImport("uxtheme.dll", EntryPoint = "#136")]
-        static extern void FlushMenuThemes();
-
-        public static void ApplyMenuTheme(bool dark)
+        /// <summary>
+        /// Haalt de werkmap uit het zoekpad voor DLL's, zodat een bestand dat toevallig (of kwaadwillig) in de map staat
+        /// van waaruit het programma wordt gestart nooit als systeembibliotheek wordt geladen.
+        /// </summary>
+        public static void HardenDllSearch()
         {
-            try
-            {
-                SetPreferredAppMode(dark ? 2 : 3);   // 2 = altijd donker, 3 = altijd licht
-                FlushMenuThemes();
-            }
-            catch (EntryPointNotFoundException) { }
-            catch (DllNotFoundException) { }
+            try { SetDllDirectory(""); }
+            catch (Exception) { }
         }
 
         public static uint GetMonitorDpi(IntPtr monitor)

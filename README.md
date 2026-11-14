@@ -94,6 +94,10 @@ Er draait altijd maar één exemplaar. Start je het nog een keer, dan opent de a
 
 Kopieer alleen `dist\WeekKalender.exe`, zet het op een vaste plek en start het. Zet daarna autostart aan via het menu van het icoon.
 
+## Veiligheid
+
+Zie [BEVEILIGING.md](BEVEILIGING.md): wat het programma aanraakt, welke maatregelen in de code zitten, hoe IT het zelf kan controleren en wat nog openstaat (het bestand is niet digitaal ondertekend).
+
 ## Bouwen
 
 Nodig: Windows 10/11 en de C#-compiler uit Visual Studio Build Tools (staat op deze pc). Er worden geen pakketten gedownload.
@@ -102,7 +106,7 @@ Nodig: Windows 10/11 en de C#-compiler uit Visual Studio Build Tools (staat op d
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Dit maakt `dist\WeekKalender.exe`, voert de alleen-lezen-controle uit en draait de tests (55 stuks: ISO-weeknummers met jaargrenzen, week 53 en schrikkeljaren tegen een onafhankelijke berekening voor elke dag van 1900 t/m 2100, maandraster, weekinvoer, .ics en herhalingsregels, schermplaatsing, cache, instellingen, autostart, time-outs en foutafhandeling als Outlook ontbreekt, hangt of weigert). `-SkipTests` slaat de tests over.
+Dit maakt `dist\WeekKalender.exe`, voert de alleen-lezen-controle uit en draait de tests (57 stuks: ISO-weeknummers met jaargrenzen, week 53 en schrikkeljaren tegen een onafhankelijke berekening voor elke dag van 1900 t/m 2100, maandraster, weekinvoer, .ics en herhalingsregels, schermplaatsing, cache, instellingen, autostart, time-outs en foutafhandeling als Outlook ontbreekt, hangt of weigert). `-SkipTests` slaat de tests over.
 
 Draait het programma, dan stopt het script het voor het bouwen en start het daarna weer.
 
@@ -118,7 +122,7 @@ De Claude-app op deze pc draait afgeschermd. Wat een AI-sessie naar `AppData` of
 
 ### Waarom deze techniek
 
-WPF op .NET Framework 4.8.1, gecompileerd als één klein .exe-bestand. Het framework zit in Windows, dus er hoeft niets bij geïnstalleerd te worden en het bestand blijft ~135 KB in plaats van 70+ MB bij een zelfstandige .NET 8-app. Electron zou honderden MB kosten. Outlook-COM werkt er direct mee. Windows tekent de afgeronde hoeken en de schaduw (via DWM), en WPF schaalt per monitor (100/125/150/200%). Het icoon en het rechtsklikmenu zijn native Windows-onderdelen, zodat ze er net zo uitzien als die van Windows zelf.
+WPF op .NET Framework 4.8.1, gecompileerd als één klein .exe-bestand. Het framework zit in Windows, dus er hoeft niets bij geïnstalleerd te worden en het bestand blijft ~135 KB in plaats van 70+ MB bij een zelfstandige .NET 8-app. Electron zou honderden MB kosten. Outlook-COM werkt er direct mee. Windows tekent de afgeronde hoeken en de schaduw (via DWM), en WPF schaalt per monitor (100/125/150/200%). Het icoon en het rechtsklikmenu zijn native Windows-onderdelen. In rust doet het programma niets: geen polling, alleen een timer tot middernacht. De popup opent in ongeveer 50 ms.
 
 Geheugen (gemeten op deze pc): ongeveer 53 MB privégeheugen. Het werkgeheugen dat Taakbeheer toont is ongeveer 70 MB vlak na het openen van de popup en zakt naar een paar MB zodra de popup 20 seconden dicht is.
 
@@ -134,7 +138,7 @@ tests\          tests en de --outlook-controle
 ## Wat niet automatisch is getest
 
 - Andere schermschalingen dan 100% en meerdere monitoren: het icoon is op 16/20/24/32 px gecontroleerd en de plaatsing (taakbalk onder/boven/links/rechts, automatisch verbergen, tweede monitor) zit in de tests. Een echte 150%-monitor is niet gebruikt.
-- Middernacht en slaapstand: het icoon controleert elke 30 seconden de datum en reageert direct op ontwaken en tijdwijzigingen. Een echte nacht is niet doorlopen.
+- Middernacht en slaapstand: het icoon zet een timer tot vlak na middernacht en reageert op ontwaken en tijdwijzigingen, met een vangnet van hooguit 10 minuten. Een echte nacht is niet doorlopen.
 - Muiswiel: gebruikt dezelfde maandwissel als de knoppen en PageUp/PageDown, die wel zijn getest.
 - Enter op het tray-icoon: de bescherming tegen dubbele meldingen is niet met een echt toetsenbord nagelopen.
 - Windows 10: niet getest; daar blijven de hoeken van de popup vierkant.

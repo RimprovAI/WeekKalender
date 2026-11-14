@@ -15,6 +15,7 @@ namespace WeekKalender.App
         [STAThread]
         static int Main(string[] args)
         {
+            NativeMethods.HardenDllSearch();
             bool exitRequested = args.Any(a => a.Equals("--afsluiten", StringComparison.OrdinalIgnoreCase));
 
             // Eerst de signalen aanmaken (of openen), dan pas de mutex: zo kan een tweede start ze altijd vinden.

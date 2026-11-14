@@ -73,6 +73,9 @@ namespace WeekKalender.Core
     /// <summary>Leest een iCalendar-bestand (bijvoorbeeld een gepubliceerde Outlook-agenda) en zet afspraken uit over een periode.</summary>
     public sealed class IcsCalendar
     {
+        const int MaxEvents = 50000;
+        const int MaxResults = 20000;
+
         readonly List<IcsEvent> _events;
 
         IcsCalendar(List<IcsEvent> events)
@@ -123,7 +126,7 @@ namespace WeekKalender.Core
                     if (cl.Value.Trim().Equals("VEVENT", StringComparison.OrdinalIgnoreCase))
                     {
                         Finish(current);
-                        if (current.HasStart) events.Add(current);
+                        if (current.HasStart && events.Count < MaxEvents) events.Add(current);
                         current = null;
                     }
                     continue;
@@ -230,7 +233,8 @@ namespace WeekKalender.Core
                 {
                     DateTime limit = e.Start.FromZone(rangeEnd, target).AddDays(2);
                     DateTime? until = rule.Until.HasValue ? UntilInEventTime(rule.Until.Value, e.Start, target) : (DateTime?)null;
-                    starts = RecurrenceExpander.Occurrences(e.Start.Value, rule, until, limit);
+                    DateTime from = e.Start.FromZone(rangeStart, target) - duration - TimeSpan.FromDays(2);
+                    starts = RecurrenceExpander.Occurrences(e.Start.Value, rule, until, from, limit);
                 }
                 starts = starts.Concat(e.RDates.Select(r => e.Start.FromZone(r.ToZone(target), target)));
 
@@ -238,6 +242,7 @@ namespace WeekKalender.Core
                 var seen = new HashSet<DateTime>();
                 foreach (DateTime wall in starts)
                 {
+                    if (result.Count >= MaxResults) return result;   // begrenzing tegen een (kwaadwillig) enorm bestand
                     IcsTime occurrence = e.Start;
                     occurrence.Value = wall;
                     DateTime local = occurrence.ToZone(target);

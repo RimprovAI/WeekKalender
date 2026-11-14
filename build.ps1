@@ -25,7 +25,7 @@ $fx = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 if (-not (Test-Path $fx)) { $fx = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319' }
 $wpf = Join-Path $fx 'WPF'
 
-$coreRefs = @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'Microsoft.CSharp.dll') | ForEach-Object { "/r:$(Join-Path $fx $_)" }
+$coreRefs = @('mscorlib.dll', 'System.dll', 'System.Core.dll') | ForEach-Object { "/r:$(Join-Path $fx $_)" }
 $appRefs = $coreRefs + @(
     "/r:$(Join-Path $fx 'System.Drawing.dll')",
     "/r:$(Join-Path $fx 'System.Xaml.dll')",
@@ -35,19 +35,21 @@ $appRefs = $coreRefs + @(
     "/r:$(Join-Path $wpf 'UIAutomationProvider.dll')",
     "/r:$(Join-Path $wpf 'UIAutomationTypes.dll')"
 )
-$common = @('/nologo', '/noconfig', '/nostdlib+', '/langversion:latest', '/optimize+', '/deterministic', '/warn:4', '/utf8output', '/platform:anycpu32bitpreferred')
+$common = @('/nologo', '/noconfig', '/nostdlib+', '/langversion:latest', '/optimize+', '/deterministic', '/warn:4', '/warnaserror+', '/utf8output', '/platform:anycpu32bitpreferred')
 
-# Alleen-lezen-controle: de Outlook-koppeling mag nooit iets opslaan, verwijderen, versturen of wijzigen.
-$forbidden = @(
-    '\.(Save|SaveAs|Delete|Move|Send|Copy|ClearRecurrencePattern|Respond|Close)\s*\(',
-    '\.(Subject|Body|Start|End|Location|AllDayEvent|BusyStatus|Categories|ReminderSet|Sensitivity|Importance)\s*=[^=]'
-)
-$hits = Select-String -Path 'src\Providers\OutlookComProvider.cs' -Pattern $forbidden
-if ($hits) {
-    $hits | ForEach-Object { Write-Host "  $($_.LineNumber): $($_.Line.Trim())" -ForegroundColor Red }
-    throw 'Alleen-lezen-controle mislukt: OutlookComProvider bevat een schrijvende aanroep.'
+# Alleen-lezen-controle. Outlook wordt uitsluitend aangeroepen via OutlookCom.cs, dat alleen een vaste lijst
+# lees- en zoekacties doorlaat. Hier wordt bewaakt dat niemand daar omheen kan:
+#  - nergens 'dynamic' (late binding zonder lijst) en nergens InvokeMember buiten OutlookCom.cs;
+#  - de lijst zelf bevat geen schrijvende namen.
+$sources = Get-ChildItem src -Recurse -Filter *.cs
+$bypass = @($sources | Select-String -Pattern '\bdynamic\b' -CaseSensitive) +
+          @($sources | Where-Object { $_.Name -ne 'OutlookCom.cs' } | Select-String -Pattern 'InvokeMember|GetActiveObject\(|CreateInstance\(' | Where-Object { $_.Path -notlike '*OutlookComProvider.cs' -or $_.Line -match 'InvokeMember' })
+$writers = @(Select-String -Path 'src\Providers\OutlookCom.cs' -Pattern '"(Save|SaveAs|Delete|Move|Send|Copy|Close|Respond|Forward|Reply|ClearRecurrencePattern|Quit|Body|Categories)"')
+if ($bypass.Count -gt 0 -or $writers.Count -gt 0) {
+    @($bypass) + @($writers) | ForEach-Object { Write-Host "  $($_.Filename):$($_.LineNumber): $($_.Line.Trim())" -ForegroundColor Red }
+    throw 'Alleen-lezen-controle mislukt.'
 }
-Write-Host 'Alleen-lezen-controle: geen schrijvende Outlook-aanroepen gevonden.'
+Write-Host 'Alleen-lezen-controle: Outlook is alleen bereikbaar via de vaste leeslijst.'
 
 New-Item -ItemType Directory -Force dist, build | Out-Null
 $exe = Join-Path $PSScriptRoot 'dist\WeekKalender.exe'
@@ -67,6 +69,9 @@ try {
     & $csc @common /target:winexe /win32manifest:src\app.manifest /win32icon:src\app.ico /out:dist\WeekKalender.exe @appRefs @appSources
     if ($LASTEXITCODE -ne 0) { throw 'Bouwen van WeekKalender.exe mislukt.' }
     Write-Host ("Gebouwd: dist\WeekKalender.exe ({0:N0} KB)" -f ((Get-Item dist\WeekKalender.exe).Length / 1KB))
+    $hash = (Get-FileHash dist\WeekKalender.exe -Algorithm SHA256).Hash
+    [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'dist\SHA256.txt'), "$hash  WeekKalender.exe`r`n")
+    Write-Host "SHA-256: $hash"
 
     if (-not $SkipTests) {
         $testSources = @(Get-ChildItem src\Core, src\Providers -Recurse -Filter *.cs) + @(Get-ChildItem tests -Filter *.cs) | ForEach-Object { $_.FullName }

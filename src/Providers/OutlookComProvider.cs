@@ -10,9 +10,8 @@ namespace WeekKalender.Providers
     /// <summary>
     /// Leest de standaardagenda van klassiek Outlook via het Outlook-objectmodel (COM), inclusief terugkerende afspraken.
     ///
-    /// ALLEEN LEZEN: deze klasse roept nooit Save, Delete, Move, Send, Copy of Close aan en wijzigt geen eigenschappen
-    /// van agenda-items. build.ps1 controleert dat bij elke build. Open() toont een afspraak in een Outlook-venster;
-    /// wat de gebruiker daar doet, gebeurt in Outlook zelf.
+    /// ALLEEN LEZEN: alle aanroepen lopen via <see cref="OutlookCom"/>, dat alleen een vaste lijst lees- en zoekacties
+    /// doorlaat. Open() toont een afspraak in een Outlook-venster; wat de gebruiker daar doet, gebeurt in Outlook zelf.
     ///
     /// Alle aanroepen gebeuren op de STA-thread van AppointmentService.
     /// </summary>
@@ -23,12 +22,12 @@ namespace WeekKalender.Providers
         const int OlAppointmentClass = 26;
         const int MaxItems = 5000;
 
+        static readonly TimeSpan SyncGracePeriod = TimeSpan.FromSeconds(90);
+
         readonly string _progId;
         readonly bool _allowStart;
         readonly TimeSpan _idleRelease;
         readonly Func<DateTime> _now;
-        static readonly TimeSpan SyncGracePeriod = TimeSpan.FromSeconds(90);
-
         object _app;
         bool _startedByUs;
         DateTime _startedAtUtc;
@@ -39,12 +38,18 @@ namespace WeekKalender.Providers
             _allowStart = allowStart;
             _progId = progId;
             _idleRelease = idleRelease ?? TimeSpan.FromMinutes(5);
-            _now = now ?? (() => DateTime.Now);
+            _now = now ?? (() => DateTime.UtcNow);
         }
 
         public string Name
         {
             get { return "Outlook"; }
+        }
+
+        /// <summary>True zolang het programma een (zelf gestart) Outlook vasthoudt dat later losgelaten moet worden.</summary>
+        public bool HoldsOutlook
+        {
+            get { return _app != null; }
         }
 
         public static bool IsInstalled(string progId = DefaultProgId)
@@ -67,13 +72,13 @@ namespace WeekKalender.Providers
             }
             catch (COMException ex)
             {
-                Log.Warn("Outlook lezen: " + ex.Message + " (0x" + ex.ErrorCode.ToString("X8", CultureInfo.InvariantCulture) + ")");
+                Log.Warn("Outlook lezen: fout 0x" + ex.ErrorCode.ToString("X8", CultureInfo.InvariantCulture));
                 ReleaseApp();
                 return Describe(ex);
             }
             catch (Exception ex)
             {
-                Log.Error("Outlook lezen", ex);
+                Log.Error("Outlook lezen: " + ex.GetType().Name);
                 ReleaseApp();
                 return ProviderResult.Failed("De Outlook-agenda kon niet worden gelezen.");
             }
@@ -86,21 +91,21 @@ namespace WeekKalender.Providers
         /// <summary>Toont de afspraak (bij een reeks: dit ene voorkomen) in een Outlook-venster.</summary>
         public ProviderResult Open(Appointment appointment)
         {
-            dynamic ns = null, item = null, pattern = null, occurrence = null;
+            object ns = null, item = null, pattern = null, occurrence = null;
             try
             {
                 string reason;
                 object app = Acquire(out reason);
                 if (app == null) return ProviderResult.NotAvailable(reason);
-                ns = ((dynamic)app).GetNamespace("MAPI");
-                item = ns.GetItemFromID(appointment.OpenKey);
-                dynamic target = item;
+                ns = OutlookCom.Call(app, "GetNamespace", "MAPI");
+                item = OutlookCom.Call(ns, "GetItemFromID", appointment.OpenKey);
+                object target = item;
                 if (appointment.IsRecurring)
                 {
                     try
                     {
-                        pattern = item.GetRecurrencePattern();
-                        occurrence = pattern.GetOccurrence(appointment.Start);
+                        pattern = OutlookCom.Call(item, "GetRecurrencePattern");
+                        occurrence = OutlookCom.Call(pattern, "GetOccurrence", appointment.Start);
                         target = occurrence;
                     }
                     catch (COMException)
@@ -108,27 +113,27 @@ namespace WeekKalender.Providers
                         // Voorkomen niet gevonden: dan de reeks zelf tonen.
                     }
                 }
-                target.Display(false);
+                OutlookCom.Call(target, "Display", false);
                 return ProviderResult.Success(null, Name);
             }
             catch (COMException ex)
             {
-                Log.Warn("Outlook openen: " + ex.Message + " (0x" + ex.ErrorCode.ToString("X8", CultureInfo.InvariantCulture) + ")");
+                Log.Warn("Outlook openen: fout 0x" + ex.ErrorCode.ToString("X8", CultureInfo.InvariantCulture));
                 ReleaseApp();
                 return Describe(ex);
             }
             catch (Exception ex)
             {
-                Log.Error("Outlook openen", ex);
+                Log.Error("Outlook openen: " + ex.GetType().Name);
                 ReleaseApp();
                 return ProviderResult.Failed("De afspraak kon niet worden geopend in Outlook.");
             }
             finally
             {
-                Release(occurrence);
-                Release(pattern);
-                Release(item);
-                Release(ns);
+                OutlookCom.Release(occurrence);
+                OutlookCom.Release(pattern);
+                OutlookCom.Release(item);
+                OutlookCom.Release(ns);
                 Done();
             }
         }
@@ -162,7 +167,7 @@ namespace WeekKalender.Providers
             {
                 try
                 {
-                    object version = ((dynamic)_app).Version;   // leeft Outlook nog?
+                    OutlookCom.Get(_app, "Version");   // leeft Outlook nog?
                     return _app;
                 }
                 catch (Exception)
@@ -206,18 +211,18 @@ namespace WeekKalender.Providers
         static List<Appointment> ReadRange(object app, DateTime start, DateTime end)
         {
             var result = new List<Appointment>();
-            dynamic ns = null, folder = null, items = null, restricted = null;
+            object ns = null, folder = null, items = null, restricted = null;
             try
             {
-                ns = ((dynamic)app).GetNamespace("MAPI");
-                folder = ns.GetDefaultFolder(OlFolderCalendar);
-                items = folder.Items;
+                ns = OutlookCom.Call(app, "GetNamespace", "MAPI");
+                folder = OutlookCom.Call(ns, "GetDefaultFolder", OlFolderCalendar);
+                items = OutlookCom.Get(folder, "Items");
                 // Volgorde is belangrijk: eerst sorteren, dan herhalingen aanzetten, dan filteren.
-                items.Sort("[Start]");
-                items.IncludeRecurrences = true;
+                OutlookCom.Call(items, "Sort", "[Start]");
+                OutlookCom.Set(items, "IncludeRecurrences", true);
                 restricted = Restrict(items, start.AddDays(-1), end.AddDays(1));
 
-                dynamic item = restricted.GetFirst();
+                object item = OutlookCom.Call(restricted, "GetFirst");
                 int guard = 0;
                 while (item != null && guard++ < MaxItems)
                 {
@@ -228,22 +233,23 @@ namespace WeekKalender.Providers
                     }
                     finally
                     {
-                        Release(item);
+                        OutlookCom.Release(item);
                     }
-                    item = restricted.GetNext();
+                    item = OutlookCom.Call(restricted, "GetNext");
                 }
+                OutlookCom.Release(item);
             }
             finally
             {
-                Release(restricted);
-                Release(items);
-                Release(folder);
-                Release(ns);
+                OutlookCom.Release(restricted);
+                OutlookCom.Release(items);
+                OutlookCom.Release(folder);
+                OutlookCom.Release(ns);
             }
             return result;
         }
 
-        static dynamic Restrict(dynamic items, DateTime from, DateTime to)
+        static object Restrict(object items, DateTime from, DateTime to)
         {
             // Outlook verwacht datums in de korte datumnotatie van de gebruiker; als dat niet lukt, de Amerikaanse notatie.
             var attempts = new[]
@@ -257,31 +263,31 @@ namespace WeekKalender.Providers
                 string filter = "[Start] <= '" + to.ToString(attempt.Item1, attempt.Item2) + "' AND [End] >= '" + from.ToString(attempt.Item1, attempt.Item2) + "'";
                 try
                 {
-                    return items.Restrict(filter);
+                    return OutlookCom.Call(items, "Restrict", filter);
                 }
                 catch (COMException ex)
                 {
                     last = ex;
-                    Log.Warn("Outlook-filter geweigerd (" + attempt.Item2.Name + "): " + ex.Message);
+                    Log.Warn("Outlook-filter geweigerd (" + attempt.Item2.Name + ")");
                 }
             }
             throw last;
         }
 
-        static Appointment ToAppointment(dynamic item)
+        static Appointment ToAppointment(object item)
         {
-            if ((int)item.Class != OlAppointmentClass) return null;
-            string subject = (string)item.Subject;
-            string location = (string)item.Location;
+            if (Convert.ToInt32(OutlookCom.Get(item, "Class"), CultureInfo.InvariantCulture) != OlAppointmentClass) return null;
+            string subject = OutlookCom.Get(item, "Subject") as string;
+            string location = OutlookCom.Get(item, "Location") as string;
             return new Appointment
             {
                 Subject = string.IsNullOrWhiteSpace(subject) ? "(geen onderwerp)" : subject.Trim(),
                 Location = string.IsNullOrWhiteSpace(location) ? null : location.Trim(),
-                Start = (DateTime)item.Start,
-                End = (DateTime)item.End,
-                AllDay = (bool)item.AllDayEvent,
-                IsRecurring = (bool)item.IsRecurring,
-                OpenKey = (string)item.EntryID,
+                Start = (DateTime)OutlookCom.Get(item, "Start"),
+                End = (DateTime)OutlookCom.Get(item, "End"),
+                AllDay = (bool)OutlookCom.Get(item, "AllDayEvent"),
+                IsRecurring = (bool)OutlookCom.Get(item, "IsRecurring"),
+                OpenKey = OutlookCom.Get(item, "EntryID") as string,
             };
         }
 
@@ -322,16 +328,6 @@ namespace WeekKalender.Providers
             catch (Exception) { }
             _app = null;
             _startedByUs = false;
-            // Tussenliggende COM-objecten van 'dynamic' opruimen, zodat Outlook echt losgelaten wordt.
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-        }
-
-        static void Release(object comObject)
-        {
-            if (comObject == null || !Marshal.IsComObject(comObject)) return;
-            try { Marshal.ReleaseComObject(comObject); }
-            catch (Exception) { }
         }
     }
 }

@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shell;
 using System.Windows.Threading;
 using WeekKalender.Core;
@@ -64,7 +65,8 @@ namespace WeekKalender.App
         int _loadVersion;
         int _wheelDelta;
 
-        TextBlock _monthTitle, _dayTitle, _dayWeek, _status, _notice, _weekPlaceholder;
+        TextBlock _monthTitle, _dayTitle, _dayWeek, _status, _notice, _weekPlaceholder, _titleWeek;
+        Border _weekRow;
         StackPanel _list;
         ScrollViewer _scroll;
         Border _thumb, _weekBoxBorder;
@@ -158,11 +160,25 @@ namespace WeekKalender.App
             IntPtr hwnd = new WindowInteropHelper(this).EnsureHandle();
             PositionWindow(hwnd, anchor);
             Show();
+            AnimateIn();
             Activate();
             NativeMethods.SetForegroundWindow(hwnd);
             // Tweede keer: na het tonen kloppen DPI en grootte zeker (anders scherm met andere schaling).
             PositionWindow(hwnd, anchor);
             Keyboard.Focus(this);
+        }
+
+        /// <summary>Inhoud komt in een tiende seconde zacht omhoog in beeld; uit als Windows-animaties uit staan.</summary>
+        void AnimateIn()
+        {
+            var content = Content as FrameworkElement;
+            if (content == null || !SystemParameters.ClientAreaAnimation) return;
+            var shift = new TranslateTransform(0, 10);
+            content.RenderTransform = shift;
+            var duration = TimeSpan.FromMilliseconds(130);
+            var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            content.BeginAnimation(OpacityProperty, new DoubleAnimation(0.2, 1, duration) { EasingFunction = ease });
+            shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(10, 0, duration) { EasingFunction = ease });
         }
 
         public void HidePopup()
@@ -298,8 +314,24 @@ namespace WeekKalender.App
             TextBlock title = Text(18, _p.OnAccent, FontWeights.Bold);
             title.Text = AppTitle;
             title.VerticalAlignment = VerticalAlignment.Center;
-            title.Margin = new Thickness(20, 0, 20, 1);
-            return new Border { Height = 46, Background = _p.AccentFill, Child = title };
+            title.Margin = new Thickness(20, 0, 12, 1);
+
+            // Rechts het weeknummer van vandaag, ook als je door andere maanden bladert.
+            _titleWeek = Text(12, _p.OnAccent, FontWeights.Bold);
+            var badge = new Border
+            {
+                CornerRadius = new CornerRadius(11),
+                Background = new SolidColorBrush(Color.FromArgb(0x38, 0xFF, 0xFF, 0xFF)),
+                Padding = new Thickness(10, 3, 10, 4),
+                Margin = new Thickness(0, 0, 14, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = _titleWeek,
+            };
+            DockPanel.SetDock(badge, Dock.Right);
+            var bar = new DockPanel();
+            bar.Children.Add(badge);
+            bar.Children.Add(title);
+            return new Border { Height = 46, Background = _p.AccentFill, Child = bar };
         }
 
         UIElement BuildHeader()
@@ -337,6 +369,9 @@ namespace WeekKalender.App
         UIElement BuildDays()
         {
             Grid grid = EightColumns(MonthGrid.Rows, 40);
+            _weekRow = new Border { CornerRadius = new CornerRadius(18), Background = _p.Hover, Margin = new Thickness(0, 2, 0, 2), IsHitTestVisible = false };
+            Grid.SetColumnSpan(_weekRow, 8);
+            grid.Children.Add(_weekRow);
             for (int r = 0; r < MonthGrid.Rows; r++)
             {
                 TextBlock week = Text(12, _p.WeekNumber);
@@ -779,7 +814,10 @@ namespace WeekKalender.App
             _monthTitle.Text = DutchText.Capitalize(DutchText.MonthYear(_grid.Year, _grid.Month));
             _busyDays = _result != null && _result.IsOk ? AppointmentDay.DaysWithItems(_result.Items, _grid.FirstCell, _grid.LastCell) : NoDays;
 
+            _titleWeek.Text = "week " + IsoWeek.GetWeek(_today).ToString(CultureInfo.InvariantCulture);
             int selectedRow = _grid.RowOf(_selected);
+            _weekRow.Visibility = selectedRow >= 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (selectedRow >= 0) Grid.SetRow(_weekRow, selectedRow);
             for (int r = 0; r < MonthGrid.Rows; r++)
             {
                 TextBlock label = _weekLabels[r];
@@ -854,6 +892,13 @@ namespace WeekKalender.App
             var lines = new StackPanel();
             TextBlock time = Text(12, _p.Secondary);
             time.Text = DutchText.TimeRange(appointment, _selected);
+            DateTime now = DateTime.Now;
+            if (!appointment.AllDay && _selected == _today && appointment.Start <= now && now < appointment.End)
+            {
+                time.Text = "Nu bezig · " + time.Text;
+                time.Foreground = _p.AccentText;
+                time.FontWeight = FontWeights.Bold;
+            }
             lines.Children.Add(time);
             TextBlock subject = Text(14, _p.Text, FontWeights.Bold);
             subject.Text = appointment.Subject;

@@ -2,7 +2,7 @@
 
 Een klein programma voor het systeemvak van Windows 11. Het icoon bij de klok toont het huidige weeknummer. Klik erop en je krijgt de agenda **Michalendar**: weeknummers en je afspraken uit Outlook, in een rustige eigen huisstijl.
 
-Het programma is één bestand van ongeveer 135 KB: `dist\WeekKalender.exe` in deze map. Dat is ook het bestand dat je dagelijks gebruikt; autostart en het Startmenu wijzen ernaar. Er is geen installatie nodig, geen adminrechten en geen extra runtime: het draait op .NET Framework 4.8.1, dat standaard in Windows 11 zit.
+Het programma is één bestand van ongeveer 135 KB: `dist\WeekKalender.exe` in deze map. Dat is ook het bestand dat je dagelijks gebruikt; autostart en het Startmenu wijzen ernaar. Er is geen installatie nodig, het draait op .NET Framework 4.8.1, dat standaard in Windows 11 zit.
 
 De naam op het scherm is Michalendar. Het bestand, de map met instellingen en de snelkoppelingen heten nog WeekKalender.
 
@@ -112,19 +112,11 @@ Draait het programma, dan stopt het script het voor het bouwen en start het daar
 
 `build\WeekKalender.Tests.exe --outlook` leest je echte Outlook-agenda en toont alleen aantallen en tijden, geen onderwerpen. `tools\make-icon.ps1` maakt het programma-icoon `src\app.ico` opnieuw. `WEEKKALENDER_GPU=1` als omgevingsvariabele zet WPF-hardwareversnelling aan; standaard staat die uit, wat ongeveer 30 MB geheugen scheelt.
 
-### Let op bij werken vanuit de Claude-app
-
-De Claude-app op deze pc draait afgeschermd. Wat een AI-sessie naar `AppData` of naar het register (`HKEY_CURRENT_USER`) schrijft, komt in een privékopie van de Claude-app terecht en niet in het echte Windows. Daardoor is eerder een "geïnstalleerde" kopie van dit programma in de cache van Claude beland en heeft een autostart-regel in het register nooit echt bestaan. Daarom geldt:
-
-- het programma blijft in deze map (`Documenten`), niet in `AppData`;
-- het wordt gestart via Verkenner (`explorer.exe pad\naar\WeekKalender.exe`), zodat het als gewoon programma draait;
-- het echte register lees of wijzig je vanuit zo'n sessie via WMI (`StdRegProv`).
-
 ### Waarom deze techniek
 
 WPF op .NET Framework 4.8.1, gecompileerd als één klein .exe-bestand. Het framework zit in Windows, dus er hoeft niets bij geïnstalleerd te worden en het bestand blijft ~135 KB in plaats van 70+ MB bij een zelfstandige .NET 8-app. Electron zou honderden MB kosten. Outlook-COM werkt er direct mee. Windows tekent de afgeronde hoeken en de schaduw (via DWM), en WPF schaalt per monitor (100/125/150/200%). Het icoon en het rechtsklikmenu zijn native Windows-onderdelen. In rust doet het programma niets: geen polling, alleen een timer tot middernacht. De popup opent in ongeveer 50 ms.
 
-Geheugen (gemeten op deze pc): ongeveer 53 MB privégeheugen. Het werkgeheugen dat Taakbeheer toont is ongeveer 70 MB vlak na het openen van de popup en zakt naar een paar MB zodra de popup 20 seconden dicht is.
+Geheugen: ongeveer 53 MB privégeheugen. Het werkgeheugen dat Taakbeheer toont is ongeveer 70 MB vlak na het openen van de popup en zakt naar een paar MB zodra de popup 20 seconden dicht is.
 
 ### Opbouw
 
@@ -134,11 +126,3 @@ src\Providers\  Outlook-COM (alleen lezen), .ics-bron, achtergrondthread met tim
 src\App\        tray-icoon, menu, popup, huisstijl, schermplaatsing
 tests\          tests en de --outlook-controle
 ```
-
-## Wat niet automatisch is getest
-
-- Andere schermschalingen dan 100% en meerdere monitoren: het icoon is op 16/20/24/32 px gecontroleerd en de plaatsing (taakbalk onder/boven/links/rechts, automatisch verbergen, tweede monitor) zit in de tests. Een echte 150%-monitor is niet gebruikt.
-- Middernacht en slaapstand: het icoon zet een timer tot vlak na middernacht en reageert op ontwaken en tijdwijzigingen, met een vangnet van hooguit 10 minuten. Een echte nacht is niet doorlopen.
-- Muiswiel: gebruikt dezelfde maandwissel als de knoppen en PageUp/PageDown, die wel zijn getest.
-- Enter op het tray-icoon: de bescherming tegen dubbele meldingen is niet met een echt toetsenbord nagelopen.
-- Windows 10: niet getest; daar blijven de hoeken van de popup vierkant.

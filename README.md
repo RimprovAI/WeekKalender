@@ -11,7 +11,7 @@ De naam op het scherm is Michalendar. Het bestand, de map met instellingen en de
 Start `dist\WeekKalender.exe`, of zoek in het Startmenu op "WeekKalender". Het icoon met het weeknummer verschijnt in het systeemvak. Staat het tussen de verborgen pictogrammen (pijltje ^), sleep het dan naar de taakbalk.
 
 - **Linkerklik** op het icoon opent de agenda. Opnieuw klikken, Escape of ergens anders klikken sluit hem.
-- **Rechtermuisklik** geeft het menu met *Autostart met Windows* (aan/uit) en *Afsluiten*.
+- **Rechtermuisklik** geeft het menu met *Autostart met Windows* (aan/uit), *Sneltoetsen* (overzicht van de toetsen) en *Afsluiten*.
 - **De tooltip** toont de volledige datum, bijvoorbeeld "woensdag 21 oktober 2026 – week 43".
 
 In de agenda:

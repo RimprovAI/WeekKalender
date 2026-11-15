@@ -24,7 +24,7 @@ namespace WeekKalender.App
         public const int PBT_APMRESUMESUSPEND = 0x07;
         public const int PBT_APMRESUMEAUTOMATIC = 0x12;
 
-        public const int MF_STRING = 0x0000, MF_CHECKED = 0x0008, MF_SEPARATOR = 0x0800;
+        public const int MF_STRING = 0x0000, MF_CHECKED = 0x0008, MF_POPUP = 0x0010, MF_SEPARATOR = 0x0800;
         public const int TPM_LEFTALIGN = 0x0000, TPM_RIGHTALIGN = 0x0008, TPM_BOTTOMALIGN = 0x0020, TPM_TOPALIGN = 0x0000;
         public const int TPM_RIGHTBUTTON = 0x0002, TPM_NONOTIFY = 0x0080, TPM_RETURNCMD = 0x0100, TPM_WORKAREA = 0x10000;
 

@@ -20,6 +20,7 @@ namespace WeekKalender.App
         const int CallbackMessage = NativeMethods.WM_APP + 1;
         const int CommandAutostart = 1;
         const int CommandExit = 2;
+        const int CommandInfo = 100;
 
         readonly AppSettings _settings;
         readonly Autostart _autostart;
@@ -318,6 +319,24 @@ namespace WeekKalender.App
             {
                 bool autostart = SafeIsAutostartEnabled();
                 NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING | (autostart ? NativeMethods.MF_CHECKED : 0), (IntPtr)CommandAutostart, "Autostart met Windows");
+                // Overzicht van de toetsen die in de agenda werken; aanklikken doet niets.
+                IntPtr keys = NativeMethods.CreatePopupMenu();
+                foreach (string line in new[]
+                {
+                    "Agenda sluiten\tEsc",
+                    "Dag kiezen\tPijltjestoetsen",
+                    "Vorige / volgende maand\tPage Up / Page Down",
+                    "Terug naar vandaag\tHome of T",
+                    "Maand of jaar kiezen\tM",
+                    "Weeknummer typen\tCijfertoetsen",
+                    "Naar de getypte week\tEnter",
+                    "Langs knoppen en afspraken\tTab",
+                    "Knop of afspraak activeren\tEnter of spatie",
+                })
+                {
+                    NativeMethods.AppendMenu(keys, NativeMethods.MF_STRING, (IntPtr)CommandInfo, line);
+                }
+                NativeMethods.AppendMenu(menu, NativeMethods.MF_POPUP, keys, "Sneltoetsen");
                 NativeMethods.AppendMenu(menu, NativeMethods.MF_SEPARATOR, IntPtr.Zero, null);
                 NativeMethods.AppendMenu(menu, NativeMethods.MF_STRING, (IntPtr)CommandExit, "Afsluiten");
 

@@ -60,7 +60,7 @@ namespace WeekKalender.App
         public bool Dark;
         public Color SolidColor;
         public Brush Solid, Text, Secondary, WeekNumber, Dimmed, Hover, Pressed, Separator;
-        public Brush AccentFill, AccentHover, AccentPressed, OnAccent, AccentText;
+        public Brush AccentFill, AccentHover, AccentPressed, OnAccent, AccentText, TitleFill, OnAccentSoft;
         public Brush Card, CardHover, ControlFill, ControlHover, ControlPressed, FieldFill, FieldStroke, Error;
 
         public static Palette Create(bool light)
@@ -70,6 +70,11 @@ namespace WeekKalender.App
             p.AccentHover = Brush(RedDark);
             p.AccentPressed = Brush(RedDeep);
             p.OnAccent = Brush(Colors.White);
+            p.OnAccentSoft = Brush(Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF));
+            // Titelbalk: merkrood dat naar rechtsonder iets dieper wordt, voor wat diepte zonder van de huisstijl af te wijken.
+            var title = new LinearGradientBrush(Red, Color.FromRgb(0xD0, 0x0E, 0x3E), new System.Windows.Point(0, 0), new System.Windows.Point(1, 1));
+            title.Freeze();
+            p.TitleFill = title;
 
             if (light)
             {

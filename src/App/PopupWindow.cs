@@ -24,7 +24,7 @@ namespace WeekKalender.App
         public const string AppTitle = "Michalendar";
 
         const double PopupWidth = 344;
-        const double PreferredHeight = 676;
+        const double PreferredHeight = 690;
         const double MinPopupHeight = 430;
         const double ScreenMargin = 12;
         const string LoadingText = "Afspraken laden…";
@@ -65,8 +65,15 @@ namespace WeekKalender.App
         int _loadVersion;
         int _wheelDelta;
 
-        TextBlock _monthTitle, _dayTitle, _dayWeek, _status, _notice, _weekPlaceholder, _titleWeek;
+        TextBlock _monthTitle, _dayTitle, _dayWeek, _status, _notice, _weekPlaceholder, _titleWeek, _titleDate;
         Border _weekRow;
+        readonly TranslateTransform _weekRowShift = new TranslateTransform();
+        Grid _daysGrid;
+        StackPanel _empty;
+        Style _focusStyle;
+        ProviderResult _listResult;
+        DateTime _listDay;
+        bool _weekRowPlaced;
         StackPanel _list;
         ScrollViewer _scroll;
         Border _thumb, _weekBoxBorder;
@@ -256,8 +263,24 @@ namespace WeekKalender.App
 
         // ---------------------------------------------------------------- opbouw
 
+        /// <summary>Focusring in merkrood voor wie met het toetsenbord werkt.</summary>
+        Style BuildFocusStyle()
+        {
+            var ring = new FrameworkElementFactory(typeof(System.Windows.Shapes.Rectangle));
+            ring.SetValue(System.Windows.Shapes.Shape.StrokeProperty, _p.AccentFill);
+            ring.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 2.0);
+            ring.SetValue(System.Windows.Shapes.Rectangle.RadiusXProperty, 15.0);
+            ring.SetValue(System.Windows.Shapes.Rectangle.RadiusYProperty, 15.0);
+            ring.SetValue(FrameworkElement.MarginProperty, new Thickness(-3));
+            ring.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+            var style = new Style();
+            style.Setters.Add(new Setter(Control.TemplateProperty, new ControlTemplate { VisualTree = ring }));
+            return style;
+        }
+
         void BuildUi()
         {
+            _focusStyle = BuildFocusStyle();
             var root = new Grid { Margin = new Thickness(12, 10, 12, 12) };
             foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto, GridLength.Auto })
                 root.RowDefinitions.Add(new RowDefinition { Height = height });
@@ -311,10 +334,13 @@ namespace WeekKalender.App
         /// <summary>Titel in wit op merkrood, zoals het woordmerk.</summary>
         UIElement BuildTitleBar()
         {
-            TextBlock title = Text(18, _p.OnAccent, FontWeights.Bold);
-            title.Text = AppTitle;
-            title.VerticalAlignment = VerticalAlignment.Center;
-            title.Margin = new Thickness(20, 0, 12, 1);
+            TextBlock name = Text(18, _p.OnAccent, FontWeights.Bold);
+            name.Text = AppTitle;
+            _titleDate = Text(12, _p.OnAccentSoft);
+            _titleDate.Margin = new Thickness(0, 1, 0, 0);
+            var title = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(20, 0, 12, 1) };
+            title.Children.Add(name);
+            title.Children.Add(_titleDate);
 
             // Rechts het weeknummer van vandaag, ook als je door andere maanden bladert.
             _titleWeek = Text(12, _p.OnAccent, FontWeights.Bold);
@@ -331,7 +357,7 @@ namespace WeekKalender.App
             var bar = new DockPanel();
             bar.Children.Add(badge);
             bar.Children.Add(title);
-            return new Border { Height = 46, Background = _p.AccentFill, Child = bar };
+            return new Border { Height = 60, Background = _p.TitleFill, Child = bar };
         }
 
         UIElement BuildHeader()
@@ -369,9 +395,11 @@ namespace WeekKalender.App
         UIElement BuildDays()
         {
             Grid grid = EightColumns(MonthGrid.Rows, 40);
-            _weekRow = new Border { CornerRadius = new CornerRadius(18), Background = _p.Hover, Margin = new Thickness(0, 2, 0, 2), IsHitTestVisible = false };
+            _weekRow = new Border { CornerRadius = new CornerRadius(18), Background = _p.Hover, Margin = new Thickness(0, 2, 0, 2), IsHitTestVisible = false, RenderTransform = _weekRowShift };
             Grid.SetColumnSpan(_weekRow, 8);
             grid.Children.Add(_weekRow);
+            _weekRowPlaced = false;
+            _daysGrid = grid;
             for (int r = 0; r < MonthGrid.Rows; r++)
             {
                 TextBlock week = Text(12, _p.WeekNumber);
@@ -405,8 +433,20 @@ namespace WeekKalender.App
             _status.TextTrimming = TextTrimming.None;
             _status.Margin = new Thickness(4, 2, 4, 4);
             _list = new StackPanel();
+
+            // Rustige lege toestand: een agendapictogram met de tekst eronder.
+            var emptyIcon = new TextBlock { Text = ((char)0xE787).ToString(), FontFamily = IconFont, FontSize = 30, Foreground = _p.Dimmed, HorizontalAlignment = HorizontalAlignment.Center };
+            TextBlock emptyText = Text(13, _p.Secondary);
+            emptyText.Text = "Geen afspraken";
+            emptyText.HorizontalAlignment = HorizontalAlignment.Center;
+            emptyText.Margin = new Thickness(0, 8, 0, 0);
+            _empty = new StackPanel { Margin = new Thickness(0, 26, 0, 0), Visibility = Visibility.Collapsed };
+            _empty.Children.Add(emptyIcon);
+            _empty.Children.Add(emptyText);
+
             var content = new StackPanel();
             content.Children.Add(_status);
+            content.Children.Add(_empty);
             content.Children.Add(_list);
 
             _scroll = new ScrollViewer
@@ -522,6 +562,7 @@ namespace WeekKalender.App
                 },
             };
             button.SetBrushes(_p.ControlFill, _p.ControlHover, _p.ControlPressed);
+            button.FocusVisualStyle = _focusStyle;
             button.Click += (s, e) => click();
             AutomationProperties.SetName(button, name);
             return button;
@@ -543,6 +584,7 @@ namespace WeekKalender.App
             };
             if (primary) button.SetBrushes(_p.AccentFill, _p.AccentHover, _p.AccentPressed);
             else button.SetBrushes(_p.ControlFill, _p.ControlHover, _p.ControlPressed);
+            button.FocusVisualStyle = _focusStyle;
             button.Click += (s, e) => click();
             AutomationProperties.SetName(button, label);
             return button;
@@ -596,8 +638,10 @@ namespace WeekKalender.App
             if (date.Year < WeekInput.MinYear || date.Year > WeekInput.MaxYear) return;
             if (_grid != null && _grid.IsInMonth(date))
             {
+                bool changed = _selected != date.Date;
                 _selected = date.Date;
                 Render();
+                if (changed && _grid.Contains(date)) _cells[(int)(date.Date - _grid.FirstCell).TotalDays].Pop();
             }
             else
             {
@@ -631,10 +675,18 @@ namespace WeekKalender.App
         void ShowMonth(MonthGrid grid, DateTime select)
         {
             bool sameGrid = _grid != null && _grid.FirstCell == grid.FirstCell && _grid.Month == grid.Month;
+            int direction = _grid == null || sameGrid ? 0 : Math.Sign(grid.FirstCell.CompareTo(_grid.FirstCell));
             _grid = grid;
             _selected = select.Date;
-            if (sameGrid) Render();
-            else LoadAppointments();
+            if (sameGrid)
+            {
+                Render();
+                return;
+            }
+            // Nieuwe maand: de balk staat meteen goed, de dagen schuiven in vanuit de bladerrichting.
+            _weekRowPlaced = false;
+            LoadAppointments();
+            if (direction != 0 && IsVisible) Motion.SlideIn(_daysGrid, direction * 16, 170);
         }
 
         void OnCalendarWheel(object sender, MouseWheelEventArgs e)
@@ -816,8 +868,20 @@ namespace WeekKalender.App
 
             _titleWeek.Text = "week " + IsoWeek.GetWeek(_today).ToString(CultureInfo.InvariantCulture);
             int selectedRow = _grid.RowOf(_selected);
+            _titleDate.Text = DutchText.DayTitle(_today, _today);
             _weekRow.Visibility = selectedRow >= 0 ? Visibility.Visible : Visibility.Collapsed;
-            if (selectedRow >= 0) Grid.SetRow(_weekRow, selectedRow);
+            if (selectedRow >= 0)
+            {
+                // De balk glijdt naar de nieuwe week in plaats van te verspringen.
+                double y = selectedRow * 40;
+                if (_weekRowPlaced && IsVisible && Motion.Enabled) _weekRowShift.BeginAnimation(TranslateTransform.YProperty, Motion.To(y, 190));
+                else
+                {
+                    _weekRowShift.BeginAnimation(TranslateTransform.YProperty, null);
+                    _weekRowShift.Y = y;
+                }
+                _weekRowPlaced = true;
+            }
             for (int r = 0; r < MonthGrid.Rows; r++)
             {
                 TextBlock label = _weekLabels[r];
@@ -858,6 +922,7 @@ namespace WeekKalender.App
             _dayTitle.Text = DutchText.Capitalize(DutchText.DayTitle(_selected, _today));
             _dayWeek.Text = "week " + IsoWeek.GetWeek(_selected).ToString(CultureInfo.InvariantCulture);
             _list.Children.Clear();
+            bool empty = false;
 
             if (_result == null)
             {
@@ -870,9 +935,23 @@ namespace WeekKalender.App
             else
             {
                 List<Appointment> items = AppointmentDay.For(_result.Items, _selected);
-                SetStatus(items.Count == 0 ? "Geen afspraken" : null);
-                foreach (Appointment appointment in items) _list.Children.Add(BuildItem(appointment));
+                SetStatus(null);
+                empty = items.Count == 0;
+                // Alleen invloeien als er echt iets anders te zien is (andere dag of nieuwe gegevens), niet bij elke verversing.
+                bool animate = IsVisible && (_listDay != _selected || !ReferenceEquals(_listResult, _result));
+                int index = 0;
+                foreach (Appointment appointment in items)
+                {
+                    var card = (FrameworkElement)BuildItem(appointment);
+                    _list.Children.Add(card);
+                    if (animate && index < 8) Motion.SlideIn(card, 10, 170, index * 35);
+                    index++;
+                }
+                if (animate && empty) Motion.SlideIn(_empty, 8, 200);
             }
+            _empty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+            _listDay = _selected;
+            _listResult = _result;
             _scroll.ScrollToTop();
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(UpdateThumb));
         }
@@ -926,6 +1005,8 @@ namespace WeekKalender.App
                 Margin = new Thickness(0, 0, 0, 6),
             };
             button.SetBrushes(_p.Card, _p.CardHover, _p.Pressed);
+            button.FocusVisualStyle = _focusStyle;
+            button.PressScale = 0.985;
             if (_service.CanOpen(appointment))
             {
                 button.Click += (s, e) => OpenAppointment(appointment);

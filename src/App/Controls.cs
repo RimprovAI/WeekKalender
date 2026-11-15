@@ -5,31 +5,75 @@ using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 
 namespace WeekKalender.App
 {
-    /// <summary>Lichte knop zonder WPF-standaardstijl: achtergrond voor rust, hover en ingedrukt.</summary>
+    /// <summary>Korte, zachte bewegingen. Staan Windows-animaties uit, dan gebeurt alles direct.</summary>
+    internal static class Motion
+    {
+        static readonly IEasingFunction EaseOut = Frozen(new CubicEase { EasingMode = EasingMode.EaseOut });
+
+        public static bool Enabled
+        {
+            get { return SystemParameters.ClientAreaAnimation; }
+        }
+
+        public static DoubleAnimation To(double to, int milliseconds, int delay = 0)
+        {
+            return new DoubleAnimation(to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = EaseOut, BeginTime = TimeSpan.FromMilliseconds(delay) };
+        }
+
+        public static DoubleAnimation FromTo(double from, double to, int milliseconds, int delay = 0)
+        {
+            return new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = EaseOut, BeginTime = TimeSpan.FromMilliseconds(delay) };
+        }
+
+        /// <summary>Laat een element invloeien: van doorzichtig en iets verschoven naar zijn plek.</summary>
+        public static void SlideIn(FrameworkElement element, double offsetY, int milliseconds, int delay = 0)
+        {
+            if (!Enabled) return;
+            var shift = new TranslateTransform(0, offsetY);
+            element.RenderTransform = shift;
+            element.Opacity = 0;
+            element.BeginAnimation(UIElement.OpacityProperty, FromTo(0, 1, milliseconds, delay));
+            shift.BeginAnimation(TranslateTransform.YProperty, FromTo(offsetY, 0, milliseconds, delay));
+        }
+
+        static T Frozen<T>(T freezable) where T : Freezable
+        {
+            freezable.Freeze();
+            return freezable;
+        }
+    }
+
+    /// <summary>Lichte knop zonder WPF-standaardstijl: kleur vloeit over bij aanwijzen, en hij veert licht in bij indrukken.</summary>
     internal sealed class FlatButton : Border
     {
-        Brush _normal = Brushes.Transparent;
-        Brush _hover = Brushes.Transparent;
-        Brush _pressed = Brushes.Transparent;
+        readonly SolidColorBrush _fill = new SolidColorBrush(Colors.Transparent);
+        readonly ScaleTransform _scale = new ScaleTransform(1, 1);
+        Color _normal, _hover, _pressed;
         bool _interactive = true;
 
         public FlatButton()
         {
             CornerRadius = new CornerRadius(4);
             Focusable = true;
-            Background = _normal;
-            MouseEnter += (s, e) => { if (_interactive) Background = _hover; };
-            MouseLeave += (s, e) => { if (!IsMouseCaptured) Background = _normal; };
+            Background = _fill;
+            RenderTransform = _scale;
+            RenderTransformOrigin = new Point(0.5, 0.5);
+            MouseEnter += (s, e) => { if (_interactive) Fill(_hover, true); };
+            MouseLeave += (s, e) => { if (!IsMouseCaptured) Fill(_normal, true); };
             MouseLeftButtonDown += OnDown;
             MouseLeftButtonUp += OnUp;
             KeyDown += OnKey;
         }
 
         public event EventHandler Click;
+
+        /// <summary>Hoe ver de knop inveert bij indrukken (1 = niet).</summary>
+        public double PressScale = 0.96;
 
         public bool Interactive
         {
@@ -38,22 +82,54 @@ namespace WeekKalender.App
             {
                 _interactive = value;
                 Focusable = value;
-                Background = _normal;
+                Fill(_normal, false);
             }
         }
 
         public void SetBrushes(Brush normal, Brush hover, Brush pressed)
         {
-            _normal = normal;
-            _hover = hover;
-            _pressed = pressed;
-            Background = IsMouseOver && _interactive ? hover : normal;
+            _hover = ColorOf(hover);
+            _pressed = ColorOf(pressed);
+            _normal = ColorOf(normal);
+            // Doorzichtig als rustkleur: dezelfde tint zonder dekking, zodat de overgang niet via wit loopt.
+            if (_normal.A == 0) _normal = Color.FromArgb(0, _hover.R, _hover.G, _hover.B);
+            Fill(IsMouseOver && _interactive ? _hover : _normal, false);
+        }
+
+        static Color ColorOf(Brush brush)
+        {
+            var solid = brush as SolidColorBrush;
+            return solid != null ? solid.Color : Colors.Transparent;
+        }
+
+        void Fill(Color color, bool animate)
+        {
+            if (animate && Motion.Enabled)
+            {
+                _fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(color, TimeSpan.FromMilliseconds(110)));
+            }
+            else
+            {
+                _fill.BeginAnimation(SolidColorBrush.ColorProperty, null);
+                _fill.Color = color;
+            }
+        }
+
+        void Press(bool down)
+        {
+            double to = down ? PressScale : 1;
+            if (Motion.Enabled)
+            {
+                _scale.BeginAnimation(ScaleTransform.ScaleXProperty, Motion.To(to, down ? 60 : 140));
+                _scale.BeginAnimation(ScaleTransform.ScaleYProperty, Motion.To(to, down ? 60 : 140));
+            }
         }
 
         void OnDown(object sender, MouseButtonEventArgs e)
         {
             if (!_interactive) return;
-            Background = _pressed;
+            Fill(_pressed, true);
+            Press(true);
             CaptureMouse();
             e.Handled = true;
         }
@@ -64,7 +140,8 @@ namespace WeekKalender.App
             ReleaseMouseCapture();
             Point p = e.GetPosition(this);
             bool inside = p.X >= 0 && p.Y >= 0 && p.X <= ActualWidth && p.Y <= ActualHeight;
-            Background = inside ? _hover : _normal;
+            Fill(inside ? _hover : _normal, true);
+            Press(false);
             e.Handled = true;
             if (inside) RaiseClick();
         }
@@ -127,6 +204,8 @@ namespace WeekKalender.App
     /// <summary>Eén dag in het maandraster: cirkel (vandaag/selectie/hover), dagnummer en een stipje bij afspraken.</summary>
     internal sealed class DayCell : Grid
     {
+        readonly ScaleTransform _pop = new ScaleTransform(1, 1);
+
         public readonly Ellipse Circle = new Ellipse { Width = 34, Height = 34, StrokeThickness = 1.5 };
         public readonly Ellipse InnerRing = new Ellipse { Width = 29, Height = 29, StrokeThickness = 1.5 };
         public readonly TextBlock Label = new TextBlock
@@ -150,6 +229,8 @@ namespace WeekKalender.App
             Width = 40;
             Height = 40;
             Background = Brushes.Transparent;   // zodat de hele cel klikbaar is
+            Circle.RenderTransform = _pop;
+            Circle.RenderTransformOrigin = new Point(0.5, 0.5);
             Children.Add(Circle);
             Children.Add(InnerRing);
             Children.Add(Label);
@@ -160,6 +241,14 @@ namespace WeekKalender.App
 
         /// <summary>Selecteren via een schermlezer (zelfde als klikken).</summary>
         public event EventHandler Invoked;
+
+        /// <summary>De cirkel veert kort op als de dag net geselecteerd is.</summary>
+        public void Pop()
+        {
+            if (!Motion.Enabled) return;
+            _pop.BeginAnimation(ScaleTransform.ScaleXProperty, Motion.FromTo(0.72, 1, 180));
+            _pop.BeginAnimation(ScaleTransform.ScaleYProperty, Motion.FromTo(0.72, 1, 180));
+        }
 
         protected override AutomationPeer OnCreateAutomationPeer()
         {

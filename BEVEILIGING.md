@@ -51,7 +51,7 @@ Dit document beschrijft wat `WeekKalender.exe` (schermnaam Michalendar) doet en 
 
 1. **Broncode lezen.** Begin bij `OutlookCom.cs`, `IcsProvider.cs`, `Autostart.cs` en `NativeMethods.cs` (alle Windows-aanroepen staan daar).
 2. **Zelf bouwen en vergelijken.** `powershell -ExecutionPolicy Bypass -File build.ps1` bouwt de exe met de C#-compiler van Visual Studio Build Tools en toont de SHA-256. De build is deterministisch: dezelfde broncode en compilerversie geven byte voor byte dezelfde exe. De hash van de meegeleverde exe staat in `dist\SHA256.txt`.
-3. **Tests draaien.** Dezelfde opdracht draait 57 tests, waaronder die voor de alleen-lezen-lijst, de https-eis en de groottelimiet.
+3. **Tests draaien.** Dezelfde opdracht draait 59 tests, waaronder die voor de alleen-lezen-lijst, de https-eis en de groottelimiet.
 4. **Gedrag meten.** Met Process Monitor en een netwerkmonitor is te zien dat het programma in rust niets leest, schrijft of verstuurt.
 
 ## Bekende aandachtspunten

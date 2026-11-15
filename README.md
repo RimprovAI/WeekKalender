@@ -20,7 +20,9 @@ In de agenda:
 |---|---|
 | Andere maand | ronde pijltjes rechtsboven, muiswiel boven de kalender, of PageUp/PageDown |
 | Dag kiezen | klikken, of de pijltjestoetsen |
-| Terug naar vandaag | knop *Vandaag* of Home |
+| Terug naar vandaag | knop *Vandaag*, Home of de toets T |
+| Snel naar een andere maand of een ander jaar | klik op de maandnaam (of toets M) en kies de maand |
+| Een week kiezen | klik op het weeknummer links |
 | Naar een week | typ een weeknummer en druk op Enter of *Ga naar week*. Werkt ook direct: popup open, `43` typen, Enter. Met jaar: `43 2027`, `2027-W43` of `w5` |
 | Afspraak openen | klik op de afspraak; hij opent in klassiek Outlook |
 
@@ -106,7 +108,7 @@ Nodig: Windows 10/11 en de C#-compiler uit Visual Studio Build Tools (staat op d
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Dit maakt `dist\WeekKalender.exe`, voert de alleen-lezen-controle uit en draait de tests (57 stuks: ISO-weeknummers met jaargrenzen, week 53 en schrikkeljaren tegen een onafhankelijke berekening voor elke dag van 1900 t/m 2100, maandraster, weekinvoer, .ics en herhalingsregels, schermplaatsing, cache, instellingen, autostart, time-outs en foutafhandeling als Outlook ontbreekt, hangt of weigert). `-SkipTests` slaat de tests over.
+Dit maakt `dist\WeekKalender.exe`, voert de alleen-lezen-controle uit en draait de tests (59 stuks: ISO-weeknummers met jaargrenzen, week 53 en schrikkeljaren tegen een onafhankelijke berekening voor elke dag van 1900 t/m 2100, maandraster, weekinvoer, .ics en herhalingsregels, schermplaatsing, cache, instellingen, autostart, time-outs en foutafhandeling als Outlook ontbreekt, hangt of weigert). `-SkipTests` slaat de tests over.
 
 Draait het programma, dan stopt het script het voor het bouwen en start het daarna weer.
 

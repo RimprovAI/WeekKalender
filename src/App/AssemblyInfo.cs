@@ -6,9 +6,9 @@ using System.Runtime.Versioning;
 [assembly: AssemblyDescription("Weeknummer in het systeemvak met agenda; leest Outlook-afspraken alleen-lezen")]
 [assembly: AssemblyProduct("WeekKalender")]
 [assembly: AssemblyCopyright("Intern hulpmiddel, broncode meegeleverd")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
-[assembly: AssemblyInformationalVersion("1.4.0")]
+[assembly: AssemblyVersion("1.5.0.0")]
+[assembly: AssemblyFileVersion("1.5.0.0")]
+[assembly: AssemblyInformationalVersion("1.5.0")]
 [assembly: ComVisible(false)]
 
 // Systeembibliotheken (user32, shell32, dwmapi, shcore, ole32) worden alleen uit System32 geladen.

@@ -44,6 +44,27 @@ namespace WeekKalender.Core
             return a.End <= a.Start && a.Start >= from;
         }
 
+        /// <summary>Aantal afspraken per dag tussen from en to (inclusief); dagen zonder afspraken ontbreken.</summary>
+        public static Dictionary<DateTime, int> CountsPerDay(IEnumerable<Appointment> items, DateTime from, DateTime to)
+        {
+            var counts = new Dictionary<DateTime, int>();
+            DateTime first = from.Date, last = to.Date;
+            foreach (var a in items)
+            {
+                DateTime startDay = a.Start.Date;
+                DateTime endDay = a.End > a.Start ? a.End.AddTicks(-1).Date : startDay;
+                if (startDay < first) startDay = first;
+                if (endDay > last) endDay = last;
+                for (DateTime d = startDay; d <= endDay; d = d.AddDays(1))
+                {
+                    int n;
+                    counts.TryGetValue(d, out n);
+                    counts[d] = n + 1;
+                }
+            }
+            return counts;
+        }
+
         /// <summary>Alle dagen tussen from en to (inclusief) waarop minstens één afspraak valt.</summary>
         public static HashSet<DateTime> DaysWithItems(IEnumerable<Appointment> items, DateTime from, DateTime to)
         {

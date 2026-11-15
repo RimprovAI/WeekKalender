@@ -36,7 +36,7 @@ namespace WeekKalender.App
         static readonly string ChevronUp = ((char)0xE70E).ToString();
         static readonly string ChevronDown = ((char)0xE70D).ToString();
         static readonly CornerRadius Pill = new CornerRadius(16);
-        static readonly HashSet<DateTime> NoDays = new HashSet<DateTime>();
+        static readonly Dictionary<DateTime, int> NoCounts = new Dictionary<DateTime, int>();
 
         /// <summary>Wat er op de meldingsregel staat; bepaalt wie hem mag overschrijven of wissen.</summary>
         enum NoticeKind
@@ -59,7 +59,7 @@ namespace WeekKalender.App
         DateTime _today;
         DateTime _selected;
         ProviderResult _result;
-        HashSet<DateTime> _busyDays = NoDays;
+        Dictionary<DateTime, int> _busyDays = NoCounts;
         bool _loading;
         NoticeKind _noticeKind;
         int _loadVersion;
@@ -67,6 +67,8 @@ namespace WeekKalender.App
 
         TextBlock _monthTitle, _dayTitle, _dayWeek, _status, _notice, _weekPlaceholder, _titleWeek, _titleDate;
         Border _weekRow;
+        Grid _picker;
+        int _pickerYear;
         readonly TranslateTransform _weekRowShift = new TranslateTransform();
         Grid _daysGrid;
         StackPanel _empty;
@@ -160,6 +162,7 @@ namespace WeekKalender.App
         {
             _today = DateTime.Today;
             ClearNotice();
+            HidePicker();
             _weekBox.Text = "";
             _grid = null;
             ShowMonth(MonthGrid.For(_today), _today);
@@ -292,6 +295,10 @@ namespace WeekKalender.App
             calendar.PreviewMouseWheel += OnCalendarWheel;
             Place(root, calendar, 0);
 
+            // Maandkiezer: ligt over de kalender heen en is alleen zichtbaar na een klik op de maandnaam.
+            _picker = new Grid { Background = _p.Solid, Visibility = Visibility.Collapsed };
+            Place(root, _picker, 0);
+
             Place(root, Separator(), 1);
 
             var dayHeader = new DockPanel { Margin = new Thickness(4, 0, 2, 8) };
@@ -367,10 +374,19 @@ namespace WeekKalender.App
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+            // De maandnaam is een knop: klik om snel een andere maand of een ander jaar te kiezen.
             _monthTitle = Text(16, _p.Text, FontWeights.Bold);
             _monthTitle.VerticalAlignment = VerticalAlignment.Center;
-            _monthTitle.Margin = new Thickness(8, 0, 0, 0);
-            Place(grid, _monthTitle, 0, 0);
+            var caret = new TextBlock { Text = ChevronDown, FontFamily = IconFont, FontSize = 8, Foreground = _p.Secondary, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(7, 2, 0, 0) };
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
+            titleRow.Children.Add(_monthTitle);
+            titleRow.Children.Add(caret);
+            var titleButton = new FlatButton { Child = titleRow, CornerRadius = Pill, Padding = new Thickness(10, 5, 10, 5), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, PressScale = 0.98 };
+            titleButton.SetBrushes(Brushes.Transparent, _p.Hover, _p.Pressed);
+            titleButton.FocusVisualStyle = _focusStyle;
+            titleButton.Click += (s, e) => TogglePicker();
+            AutomationProperties.SetName(titleButton, "Maand kiezen");
+            Place(grid, titleButton, 0, 0);
             FlatButton previous = IconButton(ChevronUp, "Vorige maand", () => ChangeMonth(-1));
             previous.Margin = new Thickness(0, 0, 6, 0);
             Place(grid, previous, 0, 1);
@@ -406,7 +422,11 @@ namespace WeekKalender.App
                 week.HorizontalAlignment = HorizontalAlignment.Center;
                 week.VerticalAlignment = VerticalAlignment.Center;
                 _weekLabels[r] = week;
-                Place(grid, week, r, 0);
+                // Klik op het weeknummer kiest de eerste dag van die week binnen deze maand.
+                int row = r;
+                var weekHit = new Border { Background = Brushes.Transparent, Child = week, Cursor = Cursors.Hand };
+                weekHit.MouseLeftButtonUp += (s, e) => SelectWeekRow(row);
+                Place(grid, weekHit, r, 0);
 
                 for (int c = 0; c < 7; c++)
                 {
@@ -649,10 +669,87 @@ namespace WeekKalender.App
             }
         }
 
+        void SelectWeekRow(int row)
+        {
+            for (int c = 0; c < 7; c++)
+            {
+                DateTime day = _grid.CellDate(row, c);
+                if (_grid.IsInMonth(day))
+                {
+                    Select(day);
+                    return;
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------- maandkiezer
+
+        void TogglePicker()
+        {
+            if (_picker.Visibility == Visibility.Visible) HidePicker();
+            else ShowPicker(_grid.Year);
+        }
+
+        void HidePicker()
+        {
+            if (_picker != null) _picker.Visibility = Visibility.Collapsed;
+        }
+
+        void ShowPicker(int year)
+        {
+            _pickerYear = Math.Max(WeekInput.MinYear, Math.Min(WeekInput.MaxYear, year));
+            _picker.Children.Clear();
+            _picker.RowDefinitions.Clear();
+            _picker.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            _picker.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var header = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            TextBlock yearText = Text(18, _p.Text, FontWeights.Bold);
+            yearText.Text = _pickerYear.ToString(CultureInfo.InvariantCulture);
+            yearText.HorizontalAlignment = HorizontalAlignment.Center;
+            yearText.VerticalAlignment = VerticalAlignment.Center;
+            Place(header, IconButton(((char)0xE76B).ToString(), "Vorig jaar", () => ShowPicker(_pickerYear - 1)), 0, 0);
+            Place(header, yearText, 0, 1);
+            Place(header, IconButton(((char)0xE76C).ToString(), "Volgend jaar", () => ShowPicker(_pickerYear + 1)), 0, 2);
+            Place(_picker, header, 0);
+
+            var months = new Grid();
+            for (int c = 0; c < 3; c++) months.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (int r = 0; r < 4; r++) months.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            for (int m = 1; m <= 12; m++)
+            {
+                int month = m;
+                bool shown = _pickerYear == _grid.Year && month == _grid.Month;
+                bool current = _pickerYear == _today.Year && month == _today.Month;
+                TextBlock label = Text(14, shown ? _p.OnAccent : current ? _p.AccentText : _p.Text, shown || current ? FontWeights.Bold : FontWeights.Normal);
+                label.Text = DutchText.MonthShort(month);
+                label.HorizontalAlignment = HorizontalAlignment.Center;
+                label.VerticalAlignment = VerticalAlignment.Center;
+                var button = new FlatButton { Child = label, CornerRadius = Pill, Margin = new Thickness(5, 7, 5, 7), FocusVisualStyle = _focusStyle };
+                if (shown) button.SetBrushes(_p.AccentFill, _p.AccentHover, _p.AccentPressed);
+                else button.SetBrushes(_p.Card, _p.ControlHover, _p.ControlPressed);
+                button.Click += (s, e) =>
+                {
+                    HidePicker();
+                    var grid = new MonthGrid(_pickerYear, month);
+                    ShowMonth(grid, grid.IsInMonth(_today) ? _today : new DateTime(_pickerYear, month, 1));
+                };
+                AutomationProperties.SetName(button, DutchText.MonthYear(_pickerYear, month));
+                Place(months, button, (month - 1) / 3, (month - 1) % 3);
+                if (IsVisible) Motion.SlideIn(button, 8, 150, (month - 1) / 3 * 25);
+            }
+            Place(_picker, months, 1);
+            _picker.Visibility = Visibility.Visible;
+        }
+
         void GoToToday()
         {
             _today = DateTime.Today;
             ClearNotice();
+            HidePicker();
             ShowMonth(MonthGrid.For(_today), _today);
         }
 
@@ -707,6 +804,12 @@ namespace WeekKalender.App
 
         void OnPreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.Key == Key.Escape && _picker.Visibility == Visibility.Visible)
+            {
+                HidePicker();
+                e.Handled = true;
+                return;
+            }
             if (e.Key == Key.Escape)
             {
                 HidePopup();
@@ -738,6 +841,8 @@ namespace WeekKalender.App
                 case Key.PageUp: ChangeMonth(-1); break;
                 case Key.PageDown: ChangeMonth(1); break;
                 case Key.Home: GoToToday(); break;
+                case Key.T: GoToToday(); break;
+                case Key.M: TogglePicker(); break;
                 default: return;
             }
             e.Handled = true;
@@ -864,7 +969,7 @@ namespace WeekKalender.App
         {
             if (_grid == null) return;
             _monthTitle.Text = DutchText.Capitalize(DutchText.MonthYear(_grid.Year, _grid.Month));
-            _busyDays = _result != null && _result.IsOk ? AppointmentDay.DaysWithItems(_result.Items, _grid.FirstCell, _grid.LastCell) : NoDays;
+            _busyDays = _result != null && _result.IsOk ? AppointmentDay.CountsPerDay(_result.Items, _grid.FirstCell, _grid.LastCell) : NoCounts;
 
             _titleWeek.Text = "week " + IsoWeek.GetWeek(_today).ToString(CultureInfo.InvariantCulture);
             int selectedRow = _grid.RowOf(_selected);
@@ -911,9 +1016,10 @@ namespace WeekKalender.App
             cell.InnerRing.Stroke = isSelected && isToday ? _p.OnAccent : null;
             cell.Label.Foreground = isToday ? _p.OnAccent : inMonth ? _p.Text : _p.Dimmed;
             cell.Label.FontWeight = isToday ? FontWeights.Bold : FontWeights.Normal;
-            bool busy = _busyDays.Contains(date);
-            cell.Dot.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
-            cell.Dot.Fill = isToday ? _p.OnAccent : inMonth ? _p.AccentFill : _p.Dimmed;
+            int count;
+            _busyDays.TryGetValue(date, out count);
+            bool busy = count > 0;
+            cell.SetDots(count, isToday ? _p.OnAccent : inMonth ? _p.AccentFill : _p.Dimmed);
             AutomationProperties.SetName(cell, DutchText.LongDate(date) + (busy ? ", met afspraken" : ""));
         }
 
@@ -977,6 +1083,16 @@ namespace WeekKalender.App
                 time.Text = "Nu bezig · " + time.Text;
                 time.Foreground = _p.AccentText;
                 time.FontWeight = FontWeights.Bold;
+            }
+            else if (!appointment.AllDay && _selected == _today)
+            {
+                // Begint binnen drie uur: dat staat ervoor, zodat je niet hoeft te rekenen.
+                string soon = DutchText.StartsIn(appointment.Start, now);
+                if (soon != null)
+                {
+                    time.Text = soon + " · " + time.Text;
+                    time.Foreground = _p.AccentText;
+                }
             }
             lines.Children.Add(time);
             TextBlock subject = Text(14, _p.Text, FontWeights.Bold);

@@ -31,6 +31,23 @@ namespace WeekKalender.Core
             return Months[month - 1];
         }
 
+        /// <summary>"jan" … "dec".</summary>
+        public static string MonthShort(int month)
+        {
+            return MonthsShort[month - 1];
+        }
+
+        /// <summary>"Over 25 min" of "Over 1 u 10 min" voor een afspraak die binnen drie uur begint; anders null.</summary>
+        public static string StartsIn(DateTime start, DateTime now)
+        {
+            TimeSpan wait = start - now;
+            if (wait <= TimeSpan.Zero || wait > TimeSpan.FromHours(3)) return null;
+            int minutes = (int)Math.Ceiling(wait.TotalMinutes);
+            if (minutes < 60) return "Over " + minutes.ToString(CultureInfo.InvariantCulture) + " min";
+            int rest = minutes % 60;
+            return "Over " + (minutes / 60).ToString(CultureInfo.InvariantCulture) + " u" + (rest == 0 ? "" : " " + rest.ToString(CultureInfo.InvariantCulture) + " min");
+        }
+
         public static string MonthYear(int year, int month)
         {
             return Months[month - 1] + " " + year.ToString(CultureInfo.InvariantCulture);

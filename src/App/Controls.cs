@@ -215,10 +215,10 @@ namespace WeekKalender.App
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 2),
         };
-        public readonly Ellipse Dot = new Ellipse
+        readonly Ellipse[] _dots = new Ellipse[3];
+        readonly StackPanel _dotRow = new StackPanel
         {
-            Width = 5,
-            Height = 5,
+            Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 6),
@@ -234,13 +234,28 @@ namespace WeekKalender.App
             Children.Add(Circle);
             Children.Add(InnerRing);
             Children.Add(Label);
-            Children.Add(Dot);
+            for (int i = 0; i < _dots.Length; i++)
+            {
+                _dots[i] = new Ellipse { Width = 4, Height = 4, Margin = new Thickness(1, 0, 1, 0) };
+                _dotRow.Children.Add(_dots[i]);
+            }
+            Children.Add(_dotRow);
         }
 
         public DateTime Date { get; set; }
 
         /// <summary>Selecteren via een schermlezer (zelfde als klikken).</summary>
         public event EventHandler Invoked;
+
+        /// <summary>Eén, twee of drie stipjes: hoe voller de dag, hoe meer (drie = drie of meer afspraken).</summary>
+        public void SetDots(int count, Brush fill)
+        {
+            for (int i = 0; i < _dots.Length; i++)
+            {
+                _dots[i].Visibility = i < count ? Visibility.Visible : Visibility.Collapsed;
+                _dots[i].Fill = fill;
+            }
+        }
 
         /// <summary>De cirkel veert kort op als de dag net geselecteerd is.</summary>
         public void Pop()

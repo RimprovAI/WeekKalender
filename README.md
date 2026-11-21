@@ -2,13 +2,19 @@
 
 Een klein programma voor het systeemvak van Windows 11. Het icoon bij de klok toont het huidige weeknummer. Klik erop en je krijgt de agenda **Michalendar**: weeknummers en je afspraken uit Outlook, in een rustige eigen huisstijl.
 
-Het programma is één bestand van ongeveer 135 KB: `dist\WeekKalender.exe` in deze map. Dat is ook het bestand dat je dagelijks gebruikt; autostart en het Startmenu wijzen ernaar. Er is geen installatie nodig, het draait op .NET Framework 4.8.1, dat standaard in Windows 11 zit.
+Het programma is één bestand van ongeveer 145 KB: `WeekKalender.exe`. Er is geen installatie nodig, het draait op .NET Framework 4.8.1, dat standaard in Windows 11 zit.
+
+## Downloaden
+
+De kant-en-klare exe staat bij **Releases** (rechts op de GitHub-pagina, of [direct naar de nieuwste versie](https://github.com/RimprovAI/WeekKalender/releases/latest)). Download daar `WeekKalender.exe` en `SHA256.txt`. In `SHA256.txt` staat de SHA-256-hash van de exe, zodat je kunt controleren dat het bestand niet is veranderd (in PowerShell: `Get-FileHash WeekKalender.exe`).
+
+Zet de exe op een vaste plek, bijvoorbeeld `%LOCALAPPDATA%\Programs\WeekKalender\`. Autostart wijst naar die plek.
 
 De naam op het scherm is Michalendar. Het bestand, de map met instellingen en de snelkoppelingen heten nog WeekKalender.
 
 ## Gebruik
 
-Start `dist\WeekKalender.exe`, of zoek in het Startmenu op "WeekKalender". Het icoon met het weeknummer verschijnt in het systeemvak. Staat het tussen de verborgen pictogrammen (pijltje ^), sleep het dan naar de taakbalk.
+Start `WeekKalender.exe`, of zoek in het Startmenu op "WeekKalender". Het icoon met het weeknummer verschijnt in het systeemvak. Staat het tussen de verborgen pictogrammen (pijltje ^), sleep het dan naar de taakbalk.
 
 - **Linkerklik** op het icoon opent de agenda. Opnieuw klikken, Escape of ergens anders klikken sluit hem.
 - **Rechtermuisklik** geeft het menu met *Autostart met Windows* (aan/uit), *Sneltoetsen* (overzicht van de toetsen) en *Afsluiten*.
@@ -49,9 +55,9 @@ De agenda volgt standaard de lichte of donkere modus van Windows. Met `Thema=lic
 
 **Hoe het werkt.** Het programma leest de standaardagenda van *klassiek* Outlook via de lokale COM-koppeling, inclusief terugkerende afspraken. Dat gebeurt op een achtergrondthread, dus de agenda blijft altijd bedienbaar. Afspraken worden per maand 5 minuten bewaard. De maand ervoor en erna worden alvast opgehaald, zodat bladeren direct gaat.
 
-**Nieuwe Outlook.** Op deze pc staan beide versies. Nieuwe Outlook heeft geen lokale koppeling. Daarom start het programma klassiek Outlook onzichtbaar op de achtergrond als het nog niet draait. Na 5 minuten zonder gebruik laat het programma Outlook weer los, waarna Outlook zichzelf afsluit. Een Outlook dat je zelf open hebt, wordt nooit afgesloten.
+**Nieuwe Outlook.** Op veel pc's staan klassiek en nieuwe Outlook naast elkaar. Nieuwe Outlook heeft geen lokale koppeling. Daarom start het programma klassiek Outlook onzichtbaar op de achtergrond als het nog niet draait. Na 5 minuten zonder gebruik laat het programma Outlook weer los, waarna Outlook zichzelf afsluit. Een Outlook dat je zelf open hebt, wordt nooit afgesloten.
 
-Omdat je vooral nieuwe Outlook gebruikt, loopt klassiek Outlook soms achter. Na het starten haalt Outlook eerst de laatste wijzigingen van de server. Je ziet dan onderin "Outlook is net gestart en werkt de agenda nog bij." en de agenda ververst zichzelf elke 12 seconden tot dat klaar is.
+Wie vooral nieuwe Outlook gebruikt, ziet dat klassiek Outlook soms achterloopt. Na het starten haalt Outlook eerst de laatste wijzigingen van de server. Je ziet dan onderin "Outlook is net gestart en werkt de agenda nog bij." en de agenda ververst zichzelf elke 12 seconden tot dat klaar is.
 
 **Als het niet lukt**, werkt de agenda gewoon door met weeknummers. De lijst toont dan een korte melding, bijvoorbeeld:
 - Outlook reageert niet (er staat een melding of dialoogvenster open in Outlook);
@@ -94,7 +100,7 @@ Er draait altijd maar één exemplaar. Start je het nog een keer, dan opent de a
 
 ### Op een andere pc
 
-Kopieer alleen `dist\WeekKalender.exe`, zet het op een vaste plek en start het. Zet daarna autostart aan via het menu van het icoon.
+Download `WeekKalender.exe` bij Releases (of kopieer het bestand), zet het op een vaste plek en start het. Zet daarna autostart aan via het menu van het icoon.
 
 ## Veiligheid
 
@@ -102,13 +108,13 @@ Zie [BEVEILIGING.md](BEVEILIGING.md): wat het programma aanraakt, welke maatrege
 
 ## Bouwen
 
-Nodig: Windows 10/11 en de C#-compiler uit Visual Studio Build Tools (staat op deze pc). Er worden geen pakketten gedownload.
+Nodig: Windows 10/11 en de C#-compiler uit Visual Studio Build Tools (onderdeel "MSBuild"). Er worden geen pakketten gedownload.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Dit maakt `dist\WeekKalender.exe`, voert de alleen-lezen-controle uit en draait de tests (59 stuks: ISO-weeknummers met jaargrenzen, week 53 en schrikkeljaren tegen een onafhankelijke berekening voor elke dag van 1900 t/m 2100, maandraster, weekinvoer, .ics en herhalingsregels, schermplaatsing, cache, instellingen, autostart, time-outs en foutafhandeling als Outlook ontbreekt, hangt of weigert). `-SkipTests` slaat de tests over.
+Dit maakt `dist\WeekKalender.exe` en `dist\SHA256.txt`, voert de alleen-lezen-controle uit en draait de tests (59 stuks: ISO-weeknummers met jaargrenzen, week 53 en schrikkeljaren tegen een onafhankelijke berekening voor elke dag van 1900 t/m 2100, maandraster, weekinvoer, .ics en herhalingsregels, schermplaatsing, cache, instellingen, autostart, time-outs en foutafhandeling als Outlook ontbreekt, hangt of weigert). `-SkipTests` slaat de tests over.
 
 Draait het programma, dan stopt het script het voor het bouwen en start het daarna weer.
 

@@ -50,7 +50,7 @@ Dit document beschrijft wat `WeekKalender.exe` (schermnaam Michalendar) doet en 
 ## Zelf controleren
 
 1. **Broncode lezen.** Begin bij `OutlookCom.cs`, `IcsProvider.cs`, `Autostart.cs` en `NativeMethods.cs` (alle Windows-aanroepen staan daar).
-2. **Zelf bouwen en vergelijken.** `powershell -ExecutionPolicy Bypass -File build.ps1` bouwt de exe met de C#-compiler van Visual Studio Build Tools en toont de SHA-256. De build is deterministisch: dezelfde broncode en compilerversie geven byte voor byte dezelfde exe. De hash van de meegeleverde exe staat in `dist\SHA256.txt`.
+2. **Zelf bouwen en vergelijken.** `powershell -ExecutionPolicy Bypass -File build.ps1` bouwt de exe met de C#-compiler van Visual Studio Build Tools en toont de SHA-256. De build is deterministisch: dezelfde broncode en compilerversie geven byte voor byte dezelfde exe. De hash van de gepubliceerde exe staat in `SHA256.txt` bij de release en in de releasetekst.
 3. **Tests draaien.** Dezelfde opdracht draait 59 tests, waaronder die voor de alleen-lezen-lijst, de https-eis en de groottelimiet.
 4. **Gedrag meten.** Met Process Monitor en een netwerkmonitor is te zien dat het programma in rust niets leest, schrijft of verstuurt.
 
@@ -58,7 +58,7 @@ Dit document beschrijft wat `WeekKalender.exe` (schermnaam Michalendar) doet en 
 
 Deze punten kan de maker niet zelf oplossen; ze horen bij de beoordeling.
 
-- **Geen digitale handtekening.** SmartScreen kan bij een gedownloade kopie "onbekende app" melden, en AppLocker/WDAC-beleid dat alleen ondertekende software toestaat, blokkeert het programma. Oplossing: laten ondertekenen met het code-signing-certificaat van de organisatie, of op hash vrijgeven (zie `dist\SHA256.txt`).
+- **Geen digitale handtekening.** SmartScreen kan bij een gedownloade kopie "onbekende app" melden, en AppLocker/WDAC-beleid dat alleen ondertekende software toestaat, blokkeert het programma. Oplossing: laten ondertekenen met het code-signing-certificaat van de organisatie, of op hash vrijgeven (zie `SHA256.txt` bij de release).
 - **Gedrag dat beveiligingssoftware opvalt.** Het programma zet (op verzoek) een opstartsnelkoppeling en leest Outlook via COM. Dat is hier onschuldig en aantoonbaar alleen-lezen, maar het zijn patronen waar EDR-producten op letten. Een beoordeling vooraf voorkomt een melding achteraf.
 - **Niet gescand door een externe dienst.** De exe is niet naar VirusTotal of een vergelijkbare dienst gestuurd. Op de ontwikkel-pc (Trend Micro met Defender passief) is er geen detectie geweest.
 - **Start klassiek Outlook op de achtergrond** als de gebruiker nieuwe Outlook gebruikt. Wie dat niet wil, zet `OutlookStarten=nee`.
